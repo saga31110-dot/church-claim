@@ -1,13 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>2-4區 回訪認領</title>
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
-:root{--A:#E0533D;--C:#E8A317;--D:#6B7A8F}
-*{box-sizing:border-box}body{margin:0;font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;font-size:18px;background:#f4f5f7;padding-bottom:90px}
+:root{--A:#E0533D;--C:#E8A317;--D:#6B7A8F;--g:#06c755;--dk:#1F6F5C}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;font-size:18px;background:#f4f5f7;padding-bottom:96px;color:#222}
 header{position:sticky;top:0;background:#fff;z-index:5;box-shadow:0 1px 4px #0002}
-.top{padding:12px 16px;font-weight:700}.tabs{display:flex}
+.top{padding:12px 16px 8px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.seg{display:flex;margin:0 12px 10px;background:#eef0f3;border-radius:12px;padding:4px}
+.seg button{flex:1;border:0;background:none;font-size:17px;font-weight:700;padding:10px;border-radius:9px;color:#555}
+.seg button.on{background:#fff;color:var(--dk);box-shadow:0 1px 3px #0002}
+.badge{display:inline-block;min-width:22px;padding:1px 7px;border-radius:11px;background:#C62828;color:#fff;font-size:13px;margin-left:4px}
+.tabs{display:flex}
 .tabs button{flex:1;border:0;padding:12px 4px;font-size:17px;font-weight:700;color:#fff;opacity:.55}
 .tabs button.on{opacity:1}.tA{background:var(--A)}.tC{background:var(--C)}.tD{background:var(--D)}
 .filters{display:none;gap:8px;padding:8px 12px}.filters input,.filters select{font-size:17px;padding:8px;flex:1}
@@ -15,19 +20,52 @@ header{position:sticky;top:0;background:#fff;z-index:5;box-shadow:0 1px 4px #000
 .card .n{font-size:20px;font-weight:700}.card .m{color:#555;font-size:15px;margin-top:4px}
 .card input{width:28px;height:28px;flex:none}.card.taken{opacity:.45}.card.mine{border-left:6px solid #3a9d5d}
 .by{font-size:15px;color:#333}
-footer{position:fixed;bottom:0;left:0;right:0;padding:12px;background:#fff;box-shadow:0 -1px 4px #0002}
-footer button{width:100%;font-size:20px;padding:14px;border:0;border-radius:10px;background:#06c755;color:#fff;font-weight:700}
+footer{position:fixed;bottom:0;left:0;right:0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));background:#fff;box-shadow:0 -1px 4px #0002}
+footer button{width:100%;font-size:20px;padding:14px;border:0;border-radius:10px;background:var(--g);color:#fff;font-weight:700}
 footer button:disabled{background:#aaa}
-#msg{padding:16px;text-align:center}.bind{padding:16px}.bind button{display:block;width:100%;margin:10px 0;font-size:20px;padding:14px;border-radius:10px;border:1px solid #ccc;background:#fff}
+#msg,.empty{padding:24px 16px;text-align:center;color:#555}
+.bind{padding:16px}.bind button{display:block;width:100%;margin:10px 0;font-size:20px;padding:14px;border-radius:10px;border:1px solid #ccc;background:#fff}
+.friend{margin:10px 12px;padding:12px 14px;border-radius:12px;background:#FFF4DC;color:#8A5A00;font-size:16px}
+.friend a{display:inline-block;margin-top:6px;padding:8px 14px;border-radius:8px;background:var(--g);color:#fff;text-decoration:none;font-weight:700}
+/* 我的回訪 */
+.sum{display:flex;gap:8px;padding:12px 12px 0}
+.sum div{flex:1;border-radius:12px;padding:10px 6px;text-align:center;color:#fff;font-weight:700}
+.sum b{display:block;font-size:26px}.sum span{font-size:14px}
+.s1{background:#C62828}.s2{background:#E8A317}.s3{background:#3a9d5d}
+.vcard{background:#fff;margin:10px 12px;border-radius:12px;padding:14px;box-shadow:0 1px 3px #0001;display:flex;gap:12px;align-items:center;border-left:6px solid #3a9d5d}
+.vcard.over{border-left-color:#C62828}.vcard.due{border-left-color:#E8A317}
+.tier{flex:none;width:34px;height:34px;border-radius:8px;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.vcard .n{font-size:20px;font-weight:700}.vcard .m{color:#555;font-size:15px;margin-top:3px}
+.pill{flex:none;margin-left:auto;padding:6px 10px;border-radius:16px;font-size:14px;font-weight:700;white-space:nowrap}
+.p-over{background:#FDECEA;color:#C62828}.p-due{background:#FFF4DC;color:#8A5A00}.p-ok{background:#E8F5EC;color:#2E7D46}
+/* 表單 */
+.mask{position:fixed;inset:0;background:#0007;z-index:20;display:flex;align-items:flex-end}
+.sheet{background:#fff;width:100%;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.sheet h3{margin:0 0 4px;font-size:22px}.sheet .sub{color:#666;font-size:15px;margin-bottom:12px}
+.sheet label.t{display:block;font-weight:700;margin:14px 0 6px}
+.sheet input[type=date],.sheet textarea{width:100%;font-size:18px;padding:10px;border:1px solid #ccc;border-radius:10px;font-family:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{border:1px solid #ccc;background:#fff;border-radius:20px;padding:9px 14px;font-size:17px}
+.chips button.on{background:var(--dk);border-color:var(--dk);color:#fff;font-weight:700}
+.row{display:flex;gap:10px;margin-top:18px}.row button{flex:1;font-size:19px;padding:14px;border-radius:10px;border:0;font-weight:700}
+.b-ok{background:var(--g);color:#fff}.b-ok:disabled{background:#aaa}.b-no{background:#eee;color:#333}
+.hist{margin-top:18px;border-top:1px solid #eee;padding-top:10px}.hist h4{margin:6px 0;font-size:16px;color:#555}
+.h{padding:8px 0;border-bottom:1px dashed #eee;font-size:15px}.h b{color:var(--dk)}.h .note{color:#444;margin-top:2px}
 </style></head><body>
 <div id="app"><div id="msg">載入中…</div></div>
 <script>
-const LIFF_ID = '2012396265-xmLoRhRF';      // ← 填入 LIFF ID
-const API_URL = 'https://script.google.com/macros/s/AKfycbwo0W9wULIyYuVlmJq9u2EDvFmMJH6DP2kwj-s1NIYrMRCY3WgThjrTSyInuRGpQHFzzw/exec';      // ← 填入 Apps Script /exec 網址
+const LIFF_ID = '2012397222-u2XpUCRQ';      // ← LIFF ID
+const API_URL = 'https://script.google.com/macros/s/AKfycbwo0W9wULIyYuVlmJq9u2EDvFmMJH6DP2kwj-s1NIYrMRCY3WgThjrTSyInuRGpQHFzzw/exec';      // ← Apps Script /exec 網址
+const JOSEPH_ADD_URL = 'https://line.me/R/ti/p/@236bktjr';   // 加 Joseph 好友
 const TABS = [['A 優先','A'],['C 近期斷線','C'],['D 全年未出席','D']];
-const S = {saint:null,data:null,tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:''};
+const TIER = {'A 優先':'A','C 近期斷線':'C','D 全年未出席':'D'};
+const METHODS = ['見面','電話','LINE','其他'];
+const STATUSES = ['順利聯繫','未聯繫上','有需要代禱','願意來聚會'];
+const S = {saint:null,data:null,mode:'claim',tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:'',visits:null,today:'',friend:null};
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
+const md = s => s ? (+s.slice(5,7))+'/'+(+s.slice(8,10)) : '';
+const taipeiToday = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 
 async function api(body){
   body.idToken = liff.getIDToken();
@@ -42,11 +80,22 @@ async function main(){
   try{
     await liff.init({liffId: LIFF_ID});
     if(!liff.isLoggedIn()){ liff.login(); return; }
+    checkFriend();
     const j = await api({action:'init'});
     if(!j.bound) return renderBind(j.saints, j.displayName);
-    S.saint = j.saint; S.data = j.data; render();
+    S.saint = j.saint; S.data = j.data;
+    if(new URLSearchParams(location.search).get('v')==='1') S.mode='visit';
+    render(); if(S.mode==='claim') loadVisits();
   }catch(e){ msg('無法載入：'+e.message); }
 }
+// 提醒由 Joseph 推播：沒加好友就收不到。查不到（未連結官方帳號）時不顯示
+async function checkFriend(){
+  try{ const f = await liff.getFriendship(); S.friend = !!f.friendFlag; if(S.saint) renderFriend(); }catch(e){ S.friend = null; }
+}
+function friendHtml(){
+  return S.friend===false ? '<div class="friend">要收到回訪提醒，請先加「召會助理Joseph」為好友。<br><a href="'+JOSEPH_ADD_URL+'" target="_blank">加入 Joseph 好友</a></div>' : '';
+}
+function renderFriend(){ const f=$('friendBox'); if(f) f.innerHTML=friendHtml(); }
 
 function renderBind(saints, dn){
   $('app').innerHTML = '<div class="bind"><h2>第一次使用</h2><p>'+esc(dn)+' 您好，請選擇您是哪一位（綁定後不能自行更改）：</p>'+
@@ -54,7 +103,7 @@ function renderBind(saints, dn){
     '<p style="color:#666;font-size:15px">不在名單內者無法認領，請聯絡負責弟兄。</p></div>';
   $('app').querySelectorAll('button').forEach(b=>b.onclick=async()=>{
     if(!confirm('確定您是「'+b.dataset.s+'」？')) return;
-    try{ const j = await api({action:'bind',saint:b.dataset.s}); S.saint=j.saint; S.data=j.data; render(); }
+    try{ const j = await api({action:'bind',saint:b.dataset.s}); S.saint=j.saint; S.data=j.data; render(); loadVisits(); }
     catch(e){ alert(e.message); }
   });
 }
@@ -65,17 +114,33 @@ function visible(){
   if(S.tab==='D 全年未出席'){ if(S.q) L=L.filter(p=>String(p.name).includes(S.q)); if(S.g) L=L.filter(p=>p.group===S.g); }
   return L;
 }
+function dueCount(){ return S.visits ? S.visits.filter(p=>p.overdue>=0).length : 0; }
 function render(){
+  const seg = '<div class="seg"><button data-m="claim" class="'+(S.mode==='claim'?'on':'')+'">📋 認領名單</button>'+
+    '<button data-m="visit" class="'+(S.mode==='visit'?'on':'')+'">🤝 我的回訪'+(dueCount()?'<span class="badge">'+dueCount()+'</span>':'')+'</button></div>';
+  const top = '<div class="top"><span>'+esc(S.saint)+' 平安！</span><span style="font-size:15px;color:#555">我已認領 <span id="cnt">'+myCount()+'</span> 位</span></div>';
+  if(S.mode==='visit'){
+    $('app').innerHTML = '<header>'+top+seg+'</header><div id="friendBox">'+friendHtml()+'</div><main id="vlist"><div class="empty">載入中…</div></main>';
+    bindSeg(); loadVisits(); return;
+  }
   const groups = [...new Set((S.data['D 全年未出席']||[]).map(p=>p.group))].sort();
   $('app').innerHTML =
-    '<header><div class="top">'+esc(S.saint)+'：我已認領 <span id="cnt">'+myCount()+'</span> 位</div><div class="tabs">'+
+    '<header>'+top+seg+'<div class="tabs">'+
     TABS.map(([t,c])=>'<button class="t'+c+(t===S.tab?' on':'')+'" data-t="'+esc(t)+'">'+esc(t)+'</button>').join('')+'</div>'+
     '<div class="filters" style="display:'+(S.tab==='D 全年未出席'?'flex':'none')+'"><input id="q" placeholder="搜尋姓名" value="'+esc(S.q)+'">'+
     '<select id="g"><option value="">全部群組</option>'+groups.map(g=>'<option'+(g===S.g?' selected':'')+'>'+esc(g)+'</option>').join('')+'</select></div></header>'+
-    '<main id="list"></main><footer><button id="ok">確認認領</button></footer>';
+    '<div id="friendBox">'+friendHtml()+'</div><main id="list"></main><footer><button id="ok">確認認領</button></footer>';
+  bindSeg();
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;render();});
   const q=$('q'); if(q){ q.oninput=()=>{S.q=q.value.trim();list();}; $('g').onchange=e=>{S.g=e.target.value;list();}; }
   $('ok').onclick=submit; list();
+}
+function bindSeg(){
+  document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{
+    if(b.dataset.m===S.mode) return;
+    if(S.mode==='claim' && (S.pick.size||S.drop.size) && !confirm('認領的變更還沒送出，確定要離開？')) return;
+    S.pick.clear(); S.drop.clear(); S.mode=b.dataset.m; render(); window.scrollTo(0,0);
+  });
 }
 function list(){
   const L=visible();
@@ -85,7 +150,7 @@ function list(){
     return '<label class="card'+(taken?' taken':'')+(mine?' mine':'')+'"><input type="checkbox" data-k="'+esc(p.key)+'"'+(checked?' checked':'')+(taken?' disabled':'')+'>'+
       '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+esc(p.group)+'・出席 '+esc(p.att)+'/43・連續缺席 '+esc(p.absent)+' 週</div>'+
       (p.by?'<div class="by">認領：'+esc(p.by)+'</div>':'')+'</div></label>';
-  }).join('') : '<div id="msg">沒有符合的資料</div>';
+  }).join('') : '<div class="empty">沒有符合的資料</div>';
   $('list').querySelectorAll('input').forEach(i=>i.onchange=()=>{
     const p=(S.data[S.tab]).find(x=>x.key===i.dataset.k);
     if(p.by===S.saint){ i.checked?S.drop.delete(p.key):S.drop.add(p.key); } else { i.checked?S.pick.add(p.key):S.pick.delete(p.key); }
@@ -100,11 +165,74 @@ async function submit(){
     const j = await api({action:'submit',
       claims:[...S.pick].map(k=>({key:k,name:byKey(k).name})),
       releases:[...S.drop].map(k=>({key:k,name:byKey(k).name}))});
-    S.data=j.data; S.pick.clear(); S.drop.clear(); render();
+    S.data=j.data; S.pick.clear(); S.drop.clear(); S.visits=null; render(); loadVisits();
     let t='已認領 '+j.claimed.length+' 位'+(j.released.length?'，取消 '+j.released.length+' 位':'');
     if(j.conflicts.length) t+='\n\n以下未成功：\n'+j.conflicts.map(c=>c.name+'（'+c.reason+'）').join('\n');
     alert(t);
   }catch(e){ alert(e.message); b.disabled=false; b.textContent='確認認領'; }
+}
+
+/* ===== 我的回訪 ===== */
+async function loadVisits(){
+  try{
+    const j = await api({action:'visits'});
+    S.visits=j.people; S.today=j.today; if(S.mode==='visit'){ renderSegBadge(); vlist(); }
+  }catch(e){ if($('vlist')) $('vlist').innerHTML='<div class="empty">無法載入：'+esc(e.message)+'</div>'; }
+}
+function renderSegBadge(){
+  const b=document.querySelector('.seg button[data-m=visit]'); if(!b) return;
+  b.innerHTML='🤝 我的回訪'+(dueCount()?'<span class="badge">'+dueCount()+'</span>':'');
+}
+function pill(p){
+  if(p.never) return ['due','p-over','尚未回訪'];
+  if(p.overdue>0) return ['over','p-over','逾期 '+p.overdue+' 天'];
+  if(p.overdue===0) return ['due','p-due','今天到期'];
+  return ['ok','p-ok','下次 '+md(p.due)];
+}
+function vlist(){
+  const L=S.visits||[];
+  const over=L.filter(p=>p.overdue>0||p.never).length, due=L.filter(p=>p.overdue===0&&!p.never).length, ok=L.length-over-due;
+  if(!L.length){ $('vlist').innerHTML='<div class="empty">您還沒有認領任何人。<br>請到「📋 認領名單」勾選後再回來填寫回訪。</div>'; return; }
+  $('vlist').innerHTML = '<div class="sum"><div class="s1"><b>'+over+'</b><span>逾期／未回訪</span></div><div class="s2"><b>'+due+'</b><span>今天到期</span></div><div class="s3"><b>'+ok+'</b><span>按時中</span></div></div>'+
+    L.map((p,i)=>{ const [c,pc,pt]=pill(p);
+      return '<div class="vcard '+c+'" data-i="'+i+'"><div class="tier" style="background:var(--'+p.tier+')">'+p.tier+'</div>'+
+        '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+esc(p.group)+'・'+(p.last?'上次 '+md(p.last)+'（'+esc(p.lastStatus)+'）':'還沒有回訪紀錄')+'</div></div>'+
+        '<span class="pill '+pc+'">'+pt+'</span></div>'; }).join('')+
+    '<div class="empty" style="font-size:14px">回訪週期：A 每週、C 每兩週、D 每月。點一位即可填寫回訪。</div>';
+  $('vlist').querySelectorAll('.vcard').forEach(d=>d.onclick=()=>openForm(L[+d.dataset.i]));
+}
+function chips(id, opts){ return '<div class="chips" id="'+id+'">'+opts.map(o=>'<button type="button" data-v="'+esc(o)+'">'+esc(o)+'</button>').join('')+'</div>'; }
+function openForm(p){
+  const today = S.today || taipeiToday();
+  const F = {method:'',status:''};
+  const m = document.createElement('div'); m.className='mask';
+  m.innerHTML = '<div class="sheet"><h3>'+esc(p.name)+' <span class="tier" style="display:inline-flex;width:28px;height:28px;font-size:15px;vertical-align:middle;background:var(--'+p.tier+')">'+p.tier+'</span></h3>'+
+    '<div class="sub">'+esc(p.group)+'・每 '+p.cycle+' 天回訪一次'+(p.last?'・上次 '+md(p.last):'')+'</div>'+
+    '<label class="t">回訪日期</label><input type="date" id="fd" value="'+today+'" max="'+today+'">'+
+    '<label class="t">方式</label>'+chips('fm',METHODS)+
+    '<label class="t">狀況</label>'+chips('fs',STATUSES)+
+    '<label class="t">近況備註</label><textarea id="fn" rows="3" maxlength="200" placeholder="一兩句近況或代禱事項（選填）"></textarea>'+
+    '<div class="row"><button class="b-no" id="fc">取消</button><button class="b-ok" id="fo">送出回訪</button></div>'+
+    '<div class="hist"><h4>最近紀錄</h4>'+(p.history&&p.history.length? p.history.map(h=>'<div class="h"><b>'+md(h.date)+'</b>・'+esc(h.method)+'・'+esc(h.status)+'・'+esc(h.saint)+(h.note?'<div class="note">'+esc(h.note)+'</div>':'')+'</div>').join('') : '<div class="h" style="color:#888">還沒有紀錄</div>')+'</div></div>';
+  document.body.appendChild(m); document.body.style.overflow='hidden';
+  const close=()=>{ m.remove(); document.body.style.overflow=''; };
+  m.onclick=e=>{ if(e.target===m) close(); }; m.querySelector('#fc').onclick=close;
+  [['fm','method'],['fs','status']].forEach(([id,k])=>m.querySelectorAll('#'+id+' button').forEach(b=>b.onclick=()=>{
+    m.querySelectorAll('#'+id+' button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); F[k]=b.dataset.v; }));
+  m.querySelector('#fo').onclick=async()=>{
+    const date=m.querySelector('#fd').value;
+    if(!date){ alert('請選擇回訪日期'); return; }
+    if(date>today){ alert('回訪日期不能是未來'); return; }
+    if(!F.method){ alert('請選擇回訪方式'); return; }
+    if(!F.status){ alert('請選擇狀況'); return; }
+    const b=m.querySelector('#fo'); b.disabled=true; b.textContent='送出中…';
+    try{
+      const j=await api({action:'record',key:p.key,name:p.name,date,method:F.method,status:F.status,note:m.querySelector('#fn').value.trim()});
+      S.visits=j.people; S.today=j.today; close(); renderSegBadge(); vlist();
+      const np=j.people.find(x=>x.key===p.key);
+      alert('已記錄 '+p.name+' 的回訪'+(np?'，下次回訪日：'+md(np.due):''));
+    }catch(e){ alert(e.message); b.disabled=false; b.textContent='送出回訪'; }
+  };
 }
 if (typeof window !== 'undefined' && !window.__TEST__) main();
 </script></body></html>
