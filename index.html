@@ -22,8 +22,8 @@ footer button:disabled{background:#aaa}
 </style></head><body>
 <div id="app"><div id="msg">載入中…</div></div>
 <script>
-const LIFF_ID = '';      // ← 填入 LIFF ID
-const API_URL = '';      // ← 填入 Apps Script /exec 網址
+const LIFF_ID = '2012396265-xmLoRhRF';      // ← 填入 LIFF ID
+const API_URL = 'https://script.google.com/macros/s/AKfycbwo0W9wULIyYuVlmJq9u2EDvFmMJH6DP2kwj-s1NIYrMRCY3WgThjrTSyInuRGpQHFzzw/exec';      // ← 填入 Apps Script /exec 網址
 const TABS = [['A 優先','A'],['C 近期斷線','C'],['D 全年未出席','D']];
 const S = {saint:null,data:null,tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:''};
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
