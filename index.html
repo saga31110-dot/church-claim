@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2-4區 回訪認領</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+:root{--A:#E0533D;--C:#E8A317;--D:#6B7A8F}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;font-size:18px;background:#f4f5f7;padding-bottom:90px}
+header{position:sticky;top:0;background:#fff;z-index:5;box-shadow:0 1px 4px #0002}
+.top{padding:12px 16px;font-weight:700}.tabs{display:flex}
+.tabs button{flex:1;border:0;padding:12px 4px;font-size:17px;font-weight:700;color:#fff;opacity:.55}
+.tabs button.on{opacity:1}.tA{background:var(--A)}.tC{background:var(--C)}.tD{background:var(--D)}
+.filters{display:none;gap:8px;padding:8px 12px}.filters input,.filters select{font-size:17px;padding:8px;flex:1}
+.card{background:#fff;margin:10px 12px;border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px #0001}
+.card .n{font-size:20px;font-weight:700}.card .m{color:#555;font-size:15px;margin-top:4px}
+.card input{width:28px;height:28px;flex:none}.card.taken{opacity:.45}.card.mine{border-left:6px solid #3a9d5d}
+.by{font-size:15px;color:#333}
+footer{position:fixed;bottom:0;left:0;right:0;padding:12px;background:#fff;box-shadow:0 -1px 4px #0002}
+footer button{width:100%;font-size:20px;padding:14px;border:0;border-radius:10px;background:#06c755;color:#fff;font-weight:700}
+footer button:disabled{background:#aaa}
+#msg{padding:16px;text-align:center}.bind{padding:16px}.bind button{display:block;width:100%;margin:10px 0;font-size:20px;padding:14px;border-radius:10px;border:1px solid #ccc;background:#fff}
+</style></head><body>
+<div id="app"><div id="msg">載入中…</div></div>
+<script>
+const LIFF_ID = '';      // ← 填入 LIFF ID
+const API_URL = '';      // ← 填入 Apps Script /exec 網址
+const TABS = [['A 優先','A'],['C 近期斷線','C'],['D 全年未出席','D']];
+const S = {saint:null,data:null,tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:''};
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = id => document.getElementById(id);
+
+async function api(body){
+  body.idToken = liff.getIDToken();
+  const r = await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+  const j = await r.json();
+  if(!j.ok) throw new Error(j.error||'發生錯誤');
+  return j;
+}
+function msg(t){ $('app').innerHTML = '<div id="msg">'+esc(t)+'</div>'; }
+
+async function main(){
+  try{
+    await liff.init({liffId: LIFF_ID});
+    if(!liff.isLoggedIn()){ liff.login(); return; }
+    const j = await api({action:'init'});
+    if(!j.bound) return renderBind(j.saints, j.displayName);
+    S.saint = j.saint; S.data = j.data; render();
+  }catch(e){ msg('無法載入：'+e.message); }
+}
+
+function renderBind(saints, dn){
+  $('app').innerHTML = '<div class="bind"><h2>第一次使用</h2><p>'+esc(dn)+' 您好，請選擇您是哪一位（綁定後不能自行更改）：</p>'+
+    saints.map(s=>'<button data-s="'+esc(s)+'">'+esc(s)+'</button>').join('')+
+    '<p style="color:#666;font-size:15px">不在名單內者無法認領，請聯絡負責弟兄。</p></div>';
+  $('app').querySelectorAll('button').forEach(b=>b.onclick=async()=>{
+    if(!confirm('確定您是「'+b.dataset.s+'」？')) return;
+    try{ const j = await api({action:'bind',saint:b.dataset.s}); S.saint=j.saint; S.data=j.data; render(); }
+    catch(e){ alert(e.message); }
+  });
+}
+
+function myCount(){ let n=0; for(const t in S.data) S.data[t].forEach(p=>{ if(p.by===S.saint && !S.drop.has(p.key)) n++; }); return n + S.pick.size; }
+function visible(){
+  let L = S.data[S.tab]||[];
+  if(S.tab==='D 全年未出席'){ if(S.q) L=L.filter(p=>String(p.name).includes(S.q)); if(S.g) L=L.filter(p=>p.group===S.g); }
+  return L;
+}
+function render(){
+  const groups = [...new Set((S.data['D 全年未出席']||[]).map(p=>p.group))].sort();
+  $('app').innerHTML =
+    '<header><div class="top">'+esc(S.saint)+'：我已認領 <span id="cnt">'+myCount()+'</span> 位</div><div class="tabs">'+
+    TABS.map(([t,c])=>'<button class="t'+c+(t===S.tab?' on':'')+'" data-t="'+esc(t)+'">'+esc(t)+'</button>').join('')+'</div>'+
+    '<div class="filters" style="display:'+(S.tab==='D 全年未出席'?'flex':'none')+'"><input id="q" placeholder="搜尋姓名" value="'+esc(S.q)+'">'+
+    '<select id="g"><option value="">全部群組</option>'+groups.map(g=>'<option'+(g===S.g?' selected':'')+'>'+esc(g)+'</option>').join('')+'</select></div></header>'+
+    '<main id="list"></main><footer><button id="ok">確認認領</button></footer>';
+  document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;render();});
+  const q=$('q'); if(q){ q.oninput=()=>{S.q=q.value.trim();list();}; $('g').onchange=e=>{S.g=e.target.value;list();}; }
+  $('ok').onclick=submit; list();
+}
+function list(){
+  const L=visible();
+  $('list').innerHTML = L.length? L.map(p=>{
+    const mine=p.by===S.saint, taken=p.by&&!mine;
+    const checked = mine ? !S.drop.has(p.key) : S.pick.has(p.key);
+    return '<label class="card'+(taken?' taken':'')+(mine?' mine':'')+'"><input type="checkbox" data-k="'+esc(p.key)+'"'+(checked?' checked':'')+(taken?' disabled':'')+'>'+
+      '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+esc(p.group)+'・出席 '+esc(p.att)+'/43・連續缺席 '+esc(p.absent)+' 週</div>'+
+      (p.by?'<div class="by">認領：'+esc(p.by)+'</div>':'')+'</div></label>';
+  }).join('') : '<div id="msg">沒有符合的資料</div>';
+  $('list').querySelectorAll('input').forEach(i=>i.onchange=()=>{
+    const p=(S.data[S.tab]).find(x=>x.key===i.dataset.k);
+    if(p.by===S.saint){ i.checked?S.drop.delete(p.key):S.drop.add(p.key); } else { i.checked?S.pick.add(p.key):S.pick.delete(p.key); }
+    $('cnt').textContent=myCount();
+  });
+}
+function byKey(k){ for(const t in S.data){ const p=S.data[t].find(x=>x.key===k); if(p) return p; } }
+async function submit(){
+  if(!S.pick.size && !S.drop.size){ alert('沒有變更'); return; }
+  const b=$('ok'); b.disabled=true; b.textContent='送出中…';
+  try{
+    const j = await api({action:'submit',
+      claims:[...S.pick].map(k=>({key:k,name:byKey(k).name})),
+      releases:[...S.drop].map(k=>({key:k,name:byKey(k).name}))});
+    S.data=j.data; S.pick.clear(); S.drop.clear(); render();
+    let t='已認領 '+j.claimed.length+' 位'+(j.released.length?'，取消 '+j.released.length+' 位':'');
+    if(j.conflicts.length) t+='\n\n以下未成功：\n'+j.conflicts.map(c=>c.name+'（'+c.reason+'）').join('\n');
+    alert(t);
+  }catch(e){ alert(e.message); b.disabled=false; b.textContent='確認認領'; }
+}
+if (typeof window !== 'undefined' && !window.__TEST__) main();
+</script></body></html>
