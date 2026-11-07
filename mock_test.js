@@ -82,7 +82,7 @@ assert(/加減約 15 分鐘/.test(ctx.CONFIG.SCHEDULE_NOTE)&&/08:45/.test(ctx.CO
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.A,2);
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.B,2);
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.CD,4);
-assert(ctx.SAMPLE_SPEC.groupPool==='未認領推薦'&&ctx.SAMPLE_SPEC.personalPool==='本人已認領回訪');
+assert(ctx.SAMPLE_SPEC.groupPool==='已認領回訪推薦'&&ctx.SAMPLE_SPEC.personalPool==='本人已認領回訪');
 assert(ctx.SAMPLE_SPEC.assumption.includes('待教授調整'));
 assert.strictEqual(ctx.WEEK_HEADERS.length,43);
 assert.strictEqual(ctx.WEEK_HEADERS[0],'2025-12-29');
@@ -261,8 +261,8 @@ const firstGroup=JSON.stringify(pushes[0].messages);
 assert(log().some(l=>l[1]==='群組抽樣'&&l[2]==='2-4柱子們'&&l[5]==='失敗'&&/找不到這個群組的 ID/.test(l[6])));
 assert(!pushes.some(p=>p.to==='Cother'));
 const gb=JSON.stringify(pushes[0].messages[0].contents);
-assert(gb.includes('未認領推薦')&&gb.includes('2012397222-u2XpUCRQ')&&!gb.includes('回訪總覽')&&!gb.includes('還在等人認領'));
-ok('one group missing → logged, the other gets the shared unclaimed sample');
+assert(gb.includes('已認領回訪推薦')&&gb.includes('2012397222-u2XpUCRQ')&&!gb.includes('未認領推薦')&&!gb.includes('暫定假設')&&!gb.includes('這不是完整名單')&&!gb.includes('回訪總覽')&&!gb.includes('還在等人認領'));
+ok('one group missing → logged, the other gets the shared claimed sample');
 hook({destination:'UbotJoseph',events:[gev('join','Cpillar')]},K);
 pushes.length=0;assert.strictEqual(ctx.pushGroupReminder(),1);eqJ(pushes.map(p=>p.to),['Cpillar']);
 assert.strictEqual(JSON.stringify(pushes[0].messages),firstGroup);ok('same-day second group reuses the sample and does not resend the first group');
@@ -573,10 +573,10 @@ assert.strictEqual(sortSs.bag['A 優先'].v.find(row=>row[0]==='甲')[4],'管理
 const crowd=[];
 for(let i=0;i<20;i++) crowd.push({tier:'D',attendanceStatus:'verified',tab:'D 全年未出席',key:'n'+i,name:'名'+i,group:'g'});
 const shown=ctx.drawSample_(ctx.poolsFrom_(crowd),ctx.SAMPLE_SPEC.counts,()=>0);
-const shownText=JSON.stringify(ctx.sampleBubble_('未認領推薦','預覽',shown.list,'打開小頁面','https://liff.line.me/2012397222-u2XpUCRQ'));
-shown.list.forEach(p=>assert(shownText.includes(p.name)));
+const shownText=JSON.stringify(ctx.sampleBubble_('已認領回訪推薦','預覽',shown.list,'打開小頁面','https://liff.line.me/2012397222-u2XpUCRQ'));
+shown.list.forEach(p=>assert(shownText.includes(p.name)&&shownText.includes('k='+encodeURIComponent(p.key))));
 crowd.filter(p=>shown.list.indexOf(p)<0).forEach(p=>assert(!shownText.includes(p.name)));
-assert(!shownText.includes('另外')&&!shownText.includes('未認領 20'));ok('sample bubble lists only the draw, not the rest of the unclaimed pool');
+assert(!shownText.includes('另外')&&!shownText.includes('未認領')&&!shownText.includes('暫定假設')&&!shownText.includes('這不是完整名單')&&!shownText.includes('池不足不跨級補齊'));ok('sample bubble lists only the draw, links each stable id, and has no gray copy');
 
 const emptySs=makeSs({'待核實':[HH,['人','g',0,43,'']],'群組紀錄':[['記錄時間','事件類型','groupId／roomId／userId','來源類型','事件時間']]});
 props.GROUP_PUSH_ENABLED='true';setNow('2026-12-07');
@@ -677,5 +677,73 @@ confirmThrew=false;
 try{ctx.restoreConfirm();}catch(e){confirmThrew=true;}
 assert(confirmThrew&&!props.RESTORE_CONFIRM&&ctx._log.some(l=>l.includes('backup-id')&&l.includes('"wrote":false')));ok('restore completion is logged as not written when it stops');
 ['SHEET_ID','SOURCE_24_SHEET_ID','SOURCE_26_SHEET_ID','SOURCE_27_SHEET_ID','MIGRATION_MANIFEST_JSON','MIGRATION_CONFIRM','MIGRATION_FINGERPRINT'].forEach(k=>{if(savedConfirmProps[k]==null)delete props[k];else props[k]=savedConfirmProps[k];});
+
+const careSs=makeSs({'A 優先':[HH,
+  ['同名','一',5,4,'管理者','2-4|同名|1'],
+  ['同名','二',5,4,'聖徒二','2-4|同名|2'],
+  ['未認','三',5,4,'','2-4|未|1']
+],'B 穩定':[HH],'C 近期斷線':[HH],'D 全年未出席':[HH],'待核實':[HH,['待核','g',0,43,'管理者','2-6|待|1']],
+'名單索引':[['穩定ID','認領者','分頁','分級','姓名','群組','出席狀態','有效','併入'],
+  ['2-4|同名|1','管理者','A 優先','A','同名','一','verified','Y',''],
+  ['2-4|同名|2','聖徒二','A 優先','A','同名','二','verified','Y',''],
+  ['2-4|未|1','','A 優先','A','未認','三','verified','Y',''],
+  ['2-6|待|1','管理者','待核實','待核實','待核','g','pending','Y',''],
+  ['2-4|停|1','管理者','A 優先','A','停','五','verified','N',''],
+  ['2-4|併|1','管理者','A 優先','A','併','六','verified','Y','2-4|同名|1']],
+'群組紀錄':[['記錄時間','事件類型','groupId／roomId／userId','來源類型','事件時間'],['t','message','Cgood','group','t'],['t','message','Cpillar','group','t']],
+'抽樣紀錄':[['日期','池','對象','名單鍵','狀態'],['2026-12-07','未認領推薦','*',JSON.stringify(['2-4|未|1']),'已抽出']]});
+withSs(careSs,()=>{
+  call({action:'bind',idToken:'tok1',saint:'管理者'});
+  call({action:'bind',idToken:'tok2',saint:'聖徒二'});
+  call({action:'bind',idToken:'tok4',saint:'聖徒三'});
+  const namesBefore=careSs.names().slice();
+  const init=call({action:'init',idToken:'tok1'});
+  assert(init.ok&&!careSs.names().includes('共同照顧')&&JSON.stringify(careSs.names())===JSON.stringify(namesBefore));
+  assert.strictEqual(careSs.bag['A 優先'].v[1][4],'管理者');
+  let x=call({action:'joinCare',idToken:'tok2',key:'2-4|未|1',name:'未認'});
+  assert(!x.ok&&!careSs.bag['共同照顧']);
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|同名|1',name:'同名',saint:'管理者'});
+  assert(x.ok&&x.wrote&&careSs.bag['共同照顧'].v[1][1]==='聖徒二');
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(x.ok&&x.already&&!x.wrote&&careSs.bag['共同照顧'].v.length===2);
+  const dupPool=ctx.claimedGroupPool_(makeSs({'名單索引':[['穩定ID','認領者','分頁','分級','姓名','出席狀態','有效','併入'],['2-4|甲|1','管理者','A 優先','A','甲','verified','Y',''],['2-4|甲|1','管理者','A 優先','A','甲','verified','Y','']]}));
+  assert.strictEqual(dupPool.length,1);
+  const ids=ctx.claimedGroupPool_(careSs).map(p=>p.stableId).sort();
+  assert.strictEqual(JSON.stringify(ids),JSON.stringify(['2-4|同名|1','2-4|同名|2']));
+  let vis=call({action:'visits',idToken:'tok2'});
+  assert(vis.people.some(p=>p.key==='2-4|同名|1'&&p.care==='co')&&!vis.people.some(p=>p.key==='2-4|未|1'||p.key==='2-6|待|1'));
+  setNow('2026-11-09');
+  const recd=call({action:'record',idToken:'tok2',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫',note:'共同紀錄'});
+  assert(recd.ok&&careSs.bag['回訪紀錄'].v[1][1]==='聖徒二'&&careSs.bag['回訪紀錄'].v[1][8]==='2-4|同名|1');
+  const primary=call({action:'visits',idToken:'tok1'}).people.find(p=>p.key==='2-4|同名|1');
+  const otherName=call({action:'visits',idToken:'tok1'}).people.find(p=>p.key==='2-4|同名|2');
+  assert(primary.history.some(h=>h.saint==='聖徒二'&&h.note==='共同紀錄')&&(!otherName||!otherName.history.some(h=>h.note==='共同紀錄')));
+  assert(!call({action:'record',idToken:'tok4',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).ok);
+  call({action:'bindObserver',idToken:'tok9'});
+  assert(/觀察者/.test(call({action:'record',idToken:'tok9',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).error));
+  assert(call({action:'submit',idToken:'tok2',claims:[{key:'2-4|同名|1',name:'同名'}]}).conflicts.length&&careSs.bag['A 優先'].v[1][4]==='管理者');
+  const blocked=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(/仍有共同照顧者/.test(blocked.conflicts[0].reason)&&careSs.bag['A 優先'].v[1][4]==='管理者');
+  assert(!call({action:'leaveCare',idToken:'tok4',key:'2-4|同名|1',name:'同名'}).ok);
+  const planned=ctx.planPersonalSamples_(careSs,'2026-11-09',()=>0);
+  assert(planned.samples['管理者'].list.some(p=>p.stableId==='2-4|同名|1'));
+  assert(!planned.samples['聖徒二'].list.some(p=>(p.stableId||p.key)==='2-4|同名|1'));
+  GROUPS.Cgood={name:'一杯好咖啡',count:12};GROUPS.Cpillar.name='2-4柱子們';
+  props.GROUP_PUSH_ENABLED='true';setNow('2026-12-07');pushes.length=0;
+  assert.strictEqual(ctx.pushGroupReminder(),2);
+  const body=JSON.stringify(pushes[0].messages);
+  assert(body===JSON.stringify(pushes[1].messages));
+  assert(body.includes('已認領回訪推薦')&&body.includes('k='+encodeURIComponent('2-4|同名|1'))&&body.includes('k='+encodeURIComponent('2-4|同名|2')));
+  assert(!body.includes(encodeURIComponent('2-4|未|1'))&&!body.includes('未認領推薦')&&!body.includes('暫定假設')&&!body.includes('這不是完整名單'));
+  assert(careSs.bag['抽樣紀錄'].v.some(r=>r[1]==='未認領推薦'));
+  assert(careSs.bag['抽樣紀錄'].v.some(r=>r[1]==='已認領回訪推薦'&&!String(r[3]).includes('2-4|未|1')));
+  const left=call({action:'leaveCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(left.ok&&careSs.bag['共同照顧'].v[1][3]==='已退出'&&careSs.bag['回訪紀錄'].v.length===2);
+  assert(!call({action:'visits',idToken:'tok2'}).people.some(p=>p.key==='2-4|同名|1'));
+  assert(!call({action:'record',idToken:'tok2',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).ok);
+  const released=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(released.released.length===1&&careSs.bag['A 優先'].v[1][4]===''&&careSs.bag['回訪紀錄'].v[1][8]==='2-4|同名|1');
+});
+ok('claimed group sample, co-care visits, and old unclaimed cache stay separate');
 
 console.log('\nALL BACKEND TESTS PASSED');
