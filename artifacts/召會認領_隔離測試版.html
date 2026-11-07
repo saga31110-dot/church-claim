@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; font-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'; manifest-src 'none'">
+<title>召會認領｜隔離測試版</title>
+<style>
+:root{--A:#E0533D;--B:#2B6CB0;--C:#E8A317;--D:#6B7A8F;--P:#6B4C7A;--g:#06c755;--dk:#1F6F5C;--ink:#222}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;font-size:18px;background:#f4f5f7;color:var(--ink);padding-bottom:108px}
+.banner{position:sticky;top:0;z-index:80;background:#9A3412;color:#fff;text-align:center;font-weight:800;line-height:1.45;padding:12px 14px;font-size:17px;letter-spacing:.01em}
+header{background:#fff;box-shadow:0 1px 4px #0002}
+.top{padding:12px 14px 6px;display:flex;justify-content:space-between;gap:8px;align-items:center;font-weight:700}
+.subnote{padding:0 14px 8px;color:#555;font-size:14px;line-height:1.5}
+.roles,.seg{display:flex;gap:6px;flex-wrap:wrap;padding:0 12px 10px}
+.roles button,.seg button{flex:1 1 30%;border:0;background:#eef0f3;border-radius:10px;padding:10px 6px;font-size:15px;font-weight:700;color:#444}
+.roles button.on,.seg button.on{background:var(--dk);color:#fff}
+.tabs{display:flex;overflow-x:auto}
+.tabs button{flex:1;min-width:4.8em;border:0;padding:12px 2px;font-size:15px;font-weight:800;color:#fff;opacity:.5}
+.tabs button.on{opacity:1}
+.tA{background:var(--A)}.tB{background:var(--B)}.tC{background:var(--C)}.tD{background:var(--D)}.tP{background:var(--P)}
+.filters{display:flex;gap:8px;padding:8px 12px}
+.filters input,.filters select,textarea,input[type=date],input[type=text]{font-size:17px;padding:10px;border:1px solid #ccc;border-radius:10px;font-family:inherit;width:100%}
+.filters input,.filters select{flex:1}
+.card,.vcard,.panel{background:#fff;margin:10px 12px;border-radius:12px;padding:14px;box-shadow:0 1px 3px #0001}
+.card{display:flex;gap:12px;align-items:flex-start}
+.card.taken{opacity:.48}.card.mine{border-left:6px solid #3a9d5d}
+.card input{width:28px;height:28px;flex:none;margin-top:4px}
+.n{font-size:20px;font-weight:800}.m{color:#555;font-size:15px;margin-top:4px;line-height:1.45}.by{font-size:15px;margin-top:4px}
+.toast{margin:10px 12px;padding:12px 14px;border-radius:12px;background:#E8F5EC;color:#1B5E20;font-weight:700}
+.toast.bad{background:#FDECEA;color:#9B1C1C}
+.banner2{margin:10px 12px;padding:12px 14px;border-radius:12px;background:#E8EEF8;color:#1F3A5F;line-height:1.5}
+.warn{margin:10px 12px;padding:12px 14px;border-radius:12px;background:#FFF4DC;color:#7A4E00;line-height:1.55}
+.howto{margin:10px 12px;background:#fff;border-radius:12px;padding:12px 14px;border:2px solid #9A3412}
+.howto summary{font-size:18px;font-weight:800;cursor:pointer}
+.howto ol{margin:0;padding-left:1.2em}
+.howto li{margin:6px 0;line-height:1.45}
+.split{display:grid;grid-template-columns:1fr;gap:8px}
+@media(min-width:800px){.split{grid-template-columns:1fr 1fr}}
+.sum{display:flex;gap:8px;padding:0 12px}
+.sum div{flex:1;border-radius:12px;padding:10px 6px;text-align:center;color:#fff;font-weight:800}
+.sum b{display:block;font-size:26px}.sum span{font-size:13px}
+.s1{background:#C62828}.s2{background:#E8A317}.s3{background:#3a9d5d}
+.vcard{display:flex;gap:12px;align-items:center;border-left:6px solid #3a9d5d}
+.vcard.over{border-left-color:#C62828}.vcard.due{border-left-color:#E8A317}.vcard.pending{border-left-color:var(--P)}
+.tier{flex:none;width:36px;height:36px;border-radius:8px;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.pill{margin-left:auto;padding:6px 10px;border-radius:16px;font-size:14px;font-weight:800;white-space:nowrap}
+.p-over{background:#FDECEA;color:#C62828}.p-due{background:#FFF4DC;color:#8A5A00}.p-ok{background:#E8F5EC;color:#2E7D46}.p-pending{background:#F3EEF8;color:#6B4C7A}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chips button{border:1px solid #ccc;background:#fff;border-radius:20px;padding:9px 14px;font-size:16px}
+.chips button.on{background:var(--dk);color:#fff;border-color:var(--dk);font-weight:800}
+.row{display:flex;gap:10px;margin-top:12px}
+.row button,footer button,.primary,.ghost{font-size:18px;font-weight:800;border:0;border-radius:10px;padding:12px 14px}
+.primary{background:var(--g);color:#fff;width:100%}
+.ghost{background:#eee;color:#222}
+footer{position:fixed;left:0;right:0;bottom:0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));background:#fff;box-shadow:0 -1px 4px #0002;z-index:25}
+.mask{position:fixed;inset:0;background:#0007;z-index:50;display:flex;align-items:flex-end}
+.sheet{background:#fff;width:100%;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.sheet h3{margin:0 0 6px;font-size:22px}
+.h{padding:8px 0;border-bottom:1px dashed #eee;font-size:15px}
+.sample{border-left:6px solid var(--dk)}
+.countline{font-weight:800;margin-bottom:6px}
+.limits{font-size:15px;color:#444;line-height:1.55}
+.limits strong{color:#9A3412}
+.empty{padding:20px 16px;text-align:center;color:#555}
+</style>
+</head>
+<body>
+<div class="banner">隔離測試版｜全部為示範資料，不影響正式名單、不會發送LINE</div>
+<div id="app"></div>
+<script>
+(function () {
+  var NET = [];
+  function blocked(kind) {
+    return function () {
+      NET.push(kind);
+      var el = document.getElementById('netCount');
+      if (el) el.textContent = String(NET.length);
+      throw new Error('隔離測試版已封鎖對外連線');
+    };
+  }
+  try { window.fetch = blocked('fetch'); } catch (e) {}
+  try { window.WebSocket = blocked('WebSocket'); } catch (e2) {}
+  try { window.EventSource = blocked('EventSource'); } catch (e3) {}
+  try { window.XMLHttpRequest = blocked('XMLHttpRequest'); } catch (e4) {}
+  try { if (navigator.sendBeacon) navigator.sendBeacon = blocked('sendBeacon'); } catch (e5) {}
+
+  var KEY = 'cc-sandbox-v1';
+  var CYCLE = { A: 7, B: 30, C: 14, D: 30 };
+  var TABS = [['A 優先','A','tA'],['B 穩定','B','tB'],['C 近期斷線','C','tC'],['D 全年未出席','D','tD'],['待核實','P','tP']];
+  var METHODS = ['見面','電話','LINE','其他'];
+  var STATUSES = ['順利聯繫','未聯繫上','有需要代禱','願意來聚會'];
+  var GROUPS = ['示範群組一','示範群組二','示範群組三'];
+  var READONLY_MSG = '觀察者模式不能認領或填寫回訪。這是沙盒資料層拒絕，不是 LINE 登入，也不是正式後端權限驗證。';
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function taipeiToday(d) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d || new Date());
+    } catch (e) {
+      var x = d || new Date();
+      return x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate());
+    }
+  }
+  function addDays(iso, n) {
+    var p = String(iso).split('-');
+    var dt = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + n));
+    return dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate());
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function weekdayName(iso) {
+    var p = iso.split('-');
+    var n = Math.round(Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000);
+    return ['日','一','二','三','四','五','六'][(n + 4) % 7];
+  }
+  function nextRun(iso) {
+    var p = iso.split('-');
+    var n = Math.round(Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000);
+    for (var i = 1; i <= 7; i++) {
+      var w = ['日','一','二','三','四','五','六'][(n + i + 4) % 7];
+      if (w === '一' || w === '四' || w === '六') return addDays(iso, i);
+    }
+    return addDays(iso, 1);
+  }
+
+  var memory = null;
+  var persistKind = 'memory';
+  function probeStore() {
+    try {
+      localStorage.setItem(KEY + ':probe', '1');
+      localStorage.removeItem(KEY + ':probe');
+      persistKind = 'local';
+    } catch (e) { persistKind = 'memory'; }
+  }
+  function saveState(s) {
+    memory = s;
+    if (persistKind === 'local') {
+      try { localStorage.setItem(KEY, JSON.stringify(s)); }
+      catch (e) { persistKind = 'memory'; }
+    }
+  }
+  function loadState() {
+    probeStore();
+    if (persistKind === 'local') {
+      try {
+        var raw = localStorage.getItem(KEY);
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (parsed && parsed.v === 1 && parsed.people && parsed.visits) return parsed;
+        }
+      } catch (e2) {}
+    }
+    return memory && memory.v === 1 ? memory : null;
+  }
+  function clearStore() {
+    memory = null;
+    try { localStorage.removeItem(KEY); } catch (e) {}
+  }
+
+  function makePerson(id, tier, tab, district, att, absent, status, by) {
+    var n = id.charCodeAt(0) + id.length;
+    return {
+      id: id, name: '示範對象' + id, tier: tier, tab: tab, district: district,
+      group: GROUPS[n % GROUPS.length], att: att, absent: absent,
+      attendanceStatus: status, by: by || ''
+    };
+  }
+  function makeSeed() {
+    var today = taipeiToday();
+    var people = [];
+    var spec = [
+      ['A', 'A 優先', '2-4', 28, 6, 'verified', 10],
+      ['B', 'B 穩定', '2-4', 40, 1, 'verified', 8],
+      ['C', 'C 近期斷線', '2-4', 3, 18, 'verified', 8],
+      ['D', 'D 全年未出席', '2-4', 0, 43, 'verified', 8]
+    ];
+    spec.forEach(function (s) {
+      for (var i = 1; i <= s[6]; i++) {
+        var id = s[0] + (i < 10 ? '0' : '') + i;
+        people.push(makePerson(id, s[0], s[1], s[2], s[3], s[4], s[5], ''));
+      }
+    });
+    for (var a = 1; a <= 4; a++) people.push(makePerson('26-0' + a, '待核實', '待核實', '2-6', 0, 43, 'pending', ''));
+    for (var b = 1; b <= 3; b++) people.push(makePerson('27-0' + b, '待核實', '待核實', '2-7', 0, 43, 'pending', ''));
+    function give(id, who) { people.forEach(function (p) { if (p.id === id) p.by = who; }); }
+    ['A01','A02','A06','B01','B02','B03','C01','C02','C03','D01','D02','D03'].forEach(function (id) { give(id, '示範服事者甲'); });
+    give('A03', '示範服事者乙');
+    give('A04', '示範服事者丙');
+    give('A05', '示範服事者丙');
+    return {
+      v: 1,
+      role: '示範服事者甲',
+      people: people,
+      visits: [{
+        id: 'seed-1', personId: 'A01', saint: '示範服事者甲', date: addDays(today, -8),
+        method: '電話', status: '順利聯繫', note: '示範備註：這是虛構近況'
+      }],
+      occupied: { saint: '示範服事者丙', displayName: '示範占用顯示名', active: true }
+    };
+  }
+
+  var state = loadState() || makeSeed();
+  saveState(state);
+  var ui = {
+    mode: 'claim', tab: 'A 優先', q: '', district: '', pick: {}, drop: {},
+    form: null, sampleKind: 'group', short: false, draw: null, repairName: '',
+    repairArmed: false, toast: '', toastBad: false
+  };
+
+  function findPerson(id) {
+    for (var i = 0; i < state.people.length; i++) if (state.people[i].id === id) return state.people[i];
+    return null;
+  }
+  function isObserver() { return state.role === 'observer'; }
+  function writerError() { return isObserver() ? READONLY_MSG : ''; }
+  function visitsOf(id) {
+    return state.visits.filter(function (v) { return v.personId === id; })
+      .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  }
+  function statusOf(p) {
+    var today = taipeiToday();
+    if (p.attendanceStatus === 'pending' || p.tier === '待核實') {
+      var histP = visitsOf(p.id);
+      return { pending: true, remind: false, cycle: null, last: histP[0] || null, due: '', overdue: -9999, never: !histP.length, history: histP.slice(0, 5) };
+    }
+    var hist = visitsOf(p.id);
+    var cycle = CYCLE[p.tier];
+    var last = hist[0] || null;
+    var due = last ? addDays(last.date, cycle) : today;
+    return { pending: false, remind: true, cycle: cycle, last: last, due: due, overdue: dayDiff(today, due), never: !last, history: hist.slice(0, 5) };
+  }
+  function dayDiff(today, due) {
+    var a = Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 1, +today.slice(8, 10));
+    var b = Date.UTC(+due.slice(0, 4), +due.slice(5, 7) - 1, +due.slice(8, 10));
+    return Math.round((a - b) / 86400000);
+  }
+  function eligiblePersonal(p, who) {
+    if (p.by !== who || p.attendanceStatus === 'pending' || p.tier === '待核實') return false;
+    var st = statusOf(p);
+    if (!st.remind) return false;
+    var today = taipeiToday();
+    if (st.never || st.due <= today) return true;
+    return st.due < nextRun(today);
+  }
+  function poolsFrom(list) {
+    var pools = { A: [], B: [], CD: [] };
+    list.forEach(function (p) {
+      if (!p || p.attendanceStatus === 'pending' || p.tier === '待核實' || p.tab === '待核實') return;
+      if (p.tier === 'A') pools.A.push(p);
+      else if (p.tier === 'B') pools.B.push(p);
+      else if (p.tier === 'C' || p.tier === 'D') pools.CD.push(p);
+    });
+    return pools;
+  }
+  function drawSample(pools, rng) {
+    function take(list, n) {
+      var copy = list.slice(), out = [], k = Math.min(n, copy.length);
+      for (var i = 0; i < k; i++) {
+        var idx = Math.floor(rng() * copy.length);
+        if (idx >= copy.length) idx = copy.length - 1;
+        if (idx < 0) idx = 0;
+        out.push(copy.splice(idx, 1)[0]);
+      }
+      return out;
+    }
+    var drawn = { A: take(pools.A || [], 2), B: take(pools.B || [], 2), CD: take(pools.CD || [], 4) };
+    drawn.list = drawn.A.concat(drawn.B, drawn.CD);
+    drawn.pool = { A: (pools.A || []).length, B: (pools.B || []).length, CD: (pools.CD || []).length };
+    return drawn;
+  }
+  function sourceList() {
+    if (ui.sampleKind === 'personal') {
+      if (isObserver()) return [];
+      return state.people.filter(function (p) { return eligiblePersonal(p, state.role); });
+    }
+    return state.people.filter(function (p) { return !p.by; });
+  }
+  function activePools() {
+    var pools = poolsFrom(sourceList());
+    if (!ui.short) return pools;
+    return { A: pools.A.slice(0, 1), B: [], CD: pools.CD.slice(0, 1) };
+  }
+  function resample() {
+    var pools = activePools();
+    var prev = ui.draw ? ui.draw.list.map(function (p) { return p.id; }).join() : '';
+    var drawn = drawSample(pools, Math.random);
+    var guard = 0;
+    while (prev && drawn.list.map(function (p) { return p.id; }).join() === prev && guard < 6) {
+      var richer = (pools.A.length + pools.B.length + pools.CD.length) > drawn.list.length;
+      if (!richer) break;
+      drawn = drawSample(pools, Math.random);
+      guard++;
+    }
+    ui.draw = drawn;
+  }
+  function uniqueOk(list) {
+    var s = {};
+    for (var i = 0; i < list.length; i++) {
+      if (s[list[i].id]) return false;
+      s[list[i].id] = 1;
+    }
+    return true;
+  }
+
+  function applyClaims() {
+    var err = writerError();
+    if (err) return { ok: false, error: err };
+    var claimed = 0, released = 0, skipped = [];
+    Object.keys(ui.drop).forEach(function (id) {
+      var p = findPerson(id);
+      if (p && p.by === state.role) { p.by = ''; released++; }
+    });
+    Object.keys(ui.pick).forEach(function (id) {
+      var p = findPerson(id);
+      if (!p) return;
+      if (p.by && p.by !== state.role) { skipped.push(p.name + ' 已被 ' + p.by + ' 認領'); return; }
+      if (!p.by) { p.by = state.role; claimed++; }
+    });
+    ui.pick = {}; ui.drop = {};
+    saveState(state);
+    return { ok: true, claimed: claimed, released: released, skipped: skipped };
+  }
+  function saveVisit(personId, date, method, status, note) {
+    var err = writerError();
+    if (err) return { ok: false, error: err };
+    var p = findPerson(personId);
+    if (!p) return { ok: false, error: '找不到這位示範對象' };
+    if (p.by !== state.role) return { ok: false, error: '這位不是你認領的，沙盒拒絕寫入' };
+    var today = taipeiToday();
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: '請選擇回訪日期' };
+    if (date > today) return { ok: false, error: '回訪日期不能是未來' };
+    if (METHODS.indexOf(method) < 0) return { ok: false, error: '請選擇回訪方式' };
+    if (STATUSES.indexOf(status) < 0) return { ok: false, error: '請選擇狀況' };
+    note = String(note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 200);
+    state.visits.push({ id: 'v' + Date.now(), personId: personId, saint: state.role, date: date, method: method, status: status, note: note });
+    saveState(state);
+    return { ok: true };
+  }
+  function repairDryRun() {
+    var occ = state.occupied;
+    var claims = state.people.filter(function (p) { return p.by === occ.saint; });
+    var visitCount = state.visits.filter(function (v) { return v.saint === occ.saint; }).length;
+    return {
+      ok: true, dryRun: true, wrote: false,
+      saint: occ.saint, displayName: occ.active ? occ.displayName : '',
+      active: occ.active, claimCount: claims.length, claims: claims.map(function (p) { return p.name; }),
+      visitCount: visitCount
+    };
+  }
+  function repairConfirm(typed) {
+    var before = repairDryRun();
+    if (!state.occupied.active) return { ok: false, wrote: false, error: '沙盒裡這位目前沒有被占用', report: before };
+    if (String(typed || '') !== state.occupied.displayName) return { ok: false, wrote: false, error: '顯示名稱不符，未修改任何沙盒資料', report: before };
+    state.occupied.active = false;
+    saveState(state);
+    var afterClaims = state.people.filter(function (p) { return p.by === state.occupied.saint; }).map(function (p) { return p.name; });
+    return { ok: true, wrote: true, dryRun: false, claimsPreserved: true, claims: afterClaims, claimCount: afterClaims.length };
+  }
+
+  function myPeople() {
+    return state.people.filter(function (p) { return p.by === state.role; }).map(function (p) {
+      var st = statusOf(p);
+      p._st = st;
+      return p;
+    }).sort(function (a, b) { return b._st.overdue - a._st.overdue || (a.name < b.name ? -1 : 1); });
+  }
+  function visible() {
+    return state.people.filter(function (p) {
+      if (p.tab !== ui.tab) return false;
+      if ((ui.tab === 'D 全年未出席' || ui.tab === '待核實') && ui.q && p.name.indexOf(ui.q) < 0) return false;
+      if (ui.tab === '待核實' && ui.district && p.district !== ui.district) return false;
+      return true;
+    });
+  }
+  function myCount() {
+    var n = 0;
+    state.people.forEach(function (p) { if (p.by === state.role && !ui.drop[p.id]) n++; });
+    return n + Object.keys(ui.pick).length;
+  }
+  function mark(t) { return t === '待核實' ? '待' : t; }
+  function color(t) { return t === '待核實' ? 'P' : (t || 'D'); }
+  function meta(p) {
+    var dist = p.district + '・' + p.group + '・';
+    if (p.attendanceStatus === 'pending') return dist + '出席狀態待核實（可認領，不列入 C/D 抽樣）';
+    return dist + '出席 ' + p.att + '/43・連續缺席 ' + p.absent + ' 週';
+  }
+  function md(iso) { return iso ? (+iso.slice(5, 7)) + '/' + (+iso.slice(8, 10)) : ''; }
+
+  function toast(msg, bad) { ui.toast = msg; ui.toastBad = !!bad; render(); }
+  function render() {
+    var app = document.getElementById('app');
+    var focusId = document.activeElement && document.activeElement.id;
+    app.innerHTML = page();
+    if (focusId) {
+      var el = document.getElementById(focusId);
+      if (el) {
+        el.focus();
+        try { if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
+      }
+    }
+  }
+  function page() {
+    var who = isObserver() ? '觀察者（唯讀）' : esc(state.role);
+    var storeText = persistKind === 'local'
+      ? '這次操作存在這個瀏覽器的本機儲存，重新開啟這個檔案還看得到。按「重設示範資料」會清掉。'
+      : '這個瀏覽器不允許本機儲存，狀態只留在本次開啟的記憶體；重新整理會回到初始示範資料。';
+    return ''
+      + '<header><div class="top"><span>' + who + '</span>'
+      + (isObserver() ? '<span style="font-size:14px;color:#555">不能認領</span>' : '<span style="font-size:15px;color:#555">我已認領 <span id="cnt">' + myCount() + '</span> 位</span>')
+      + '</div>'
+      + '<div class="roles">'
+      + roleBtn('observer', '觀察者') + roleBtn('示範服事者甲', '示範服事者甲') + roleBtn('示範服事者乙', '示範服事者乙')
+      + '</div>'
+      + '<div class="subnote">切換身分只改這份沙盒。不是 LINE 登入，也不會向正式系統驗證權限。網路請求次數：<b id="netCount">' + NET.length + '</b></div>'
+      + '<div class="seg">'
+      + seg('claim', '認領名單') + seg('visit', '我的回訪') + seg('sample', '抽樣預覽') + seg('repair', '修復示範')
+      + '</div></header>'
+      + howto()
+      + (ui.toast ? '<div class="toast' + (ui.toastBad ? ' bad' : '') + '">' + esc(ui.toast) + '</div>' : '')
+      + bodyOf()
+      + '<p class="subnote">' + storeText + '</p>';
+  }
+  function roleBtn(role, label) {
+    return '<button type="button" data-act="role" data-role="' + esc(role) + '" class="' + (state.role === role ? 'on' : '') + '">' + esc(label) + '</button>';
+  }
+  function seg(mode, label) {
+    return '<button type="button" data-act="mode" data-mode="' + mode + '" class="' + (ui.mode === mode ? 'on' : '') + '">' + label + '</button>';
+  }
+  function howto() {
+    return '<details class="howto" id="howto" open><summary>怎麼測</summary><ol>'
+      + '<li>頂部紅條應一直在。這裡全部是虛構示範，不會改正式名單，也不會發 LINE。</li>'
+      + '<li>切到觀察者：名單沒有勾選。按「嘗試寫入」應出現拒絕，資料不變。</li>'
+      + '<li>切回示範服事者甲，勾一位未認領者並確認。到「我的回訪」應看得到。</li>'
+      + '<li>點開那位，填日期、方式、狀況、備註後送出。關掉檔案再打開，紀錄應還在（若瀏覽器允許儲存）。</li>'
+      + '<li>「抽樣預覽」選群組未認領推薦，結果應是 A2、B2、C/D 共 4，沒有重複，也沒有待核實的人。</li>'
+      + '<li>勾選池不足再抽，人數變少，不會用別的級距補滿。待核實分頁的人仍不進結果。</li>'
+      + '<li>「修復示範」先做 dry-run，確認沒有改資料；再輸入示範占用顯示名並解除。兩筆虛構認領要留著。</li>'
+      + '<li>按「重設示範資料」回到一開始。這一頁不能證明正式排程或正式遷移已通過。</li>'
+      + '</ol></details>'
+      + '<div class="split"><div class="warn limits"><strong>這一頁驗得到：</strong>觀察者拒寫、認領與取消、回訪紀錄留在本機、抽樣比例與池不足、待核實不進抽樣、虛構占用的 dry-run 與保留認領、重設。</div>'
+      + '<div class="warn limits"><strong>仍須另驗，不能把沙盒當正式通過：</strong>正式後端權限、真實試算表遷移與 139 筆認領／22 筆回訪對應、備份回復，以及 Apps Script 週一、四、六 09:00 真觸發。這一頁沒有建立觸發。</div></div>';
+  }
+  function bodyOf() {
+    if (ui.mode === 'visit') return visitView();
+    if (ui.mode === 'sample') return sampleView();
+    if (ui.mode === 'repair') return repairView();
+    return claimView();
+  }
+  function claimView() {
+    var groups = [];
+    state.people.forEach(function (p) {
+      if (p.tab === ui.tab && groups.indexOf(p.group) < 0) groups.push(p.group);
+    });
+    var showFilter = ui.tab === 'D 全年未出席' || ui.tab === '待核實';
+    var html = '<div class="tabs">' + TABS.map(function (t) {
+      return '<button type="button" class="' + t[2] + (ui.tab === t[0] ? ' on' : '') + '" data-act="tab" data-tab="' + esc(t[0]) + '">' + esc(t[0]) + '</button>';
+    }).join('') + '</div>';
+    if (showFilter) {
+      html += '<div class="filters"><input id="q" type="text" placeholder="搜尋示範姓名" value="' + esc(ui.q) + '">';
+      if (ui.tab === '待核實') {
+        html += '<select id="district" data-act="district"><option value="">2-6 與 2-7</option>'
+          + '<option value="2-6"' + (ui.district === '2-6' ? ' selected' : '') + '>只看 2-6</option>'
+          + '<option value="2-7"' + (ui.district === '2-7' ? ' selected' : '') + '>只看 2-7</option></select>';
+      }
+      html += '</div>';
+    }
+    if (isObserver()) html += '<div class="banner2">觀察者模式：不選人、不占用服事者身分，只能查看。下面的按鈕會把寫入送到沙盒資料層，資料層會拒絕。</div>';
+    var list = visible();
+    html += list.length ? list.map(card).join('') : '<div class="empty">這個分頁沒有符合的示範對象</div>';
+    html += '<p class="subnote">B 每月回訪。待核實可以認領，但不會當成 D 抽樣。推播比例只在「抽樣預覽」，這裡仍是完整示範名單。</p>';
+    if (isObserver()) {
+      html += '<footer><button type="button" class="primary" data-act="try-write">嘗試寫入認領（應被拒絕）</button></footer>';
+    } else {
+      html += '<footer><button type="button" class="primary" id="ok" data-act="submit-claims">確認認領</button></footer>';
+    }
+    return html;
+  }
+  function card(p) {
+    var mine = !isObserver() && p.by === state.role;
+    var taken = p.by && !mine;
+    var checked = mine ? !ui.drop[p.id] : !!ui.pick[p.id];
+    var box = '';
+    if (!isObserver()) {
+      box = '<input type="checkbox" data-act="pick" data-id="' + esc(p.id) + '"' + (checked ? ' checked' : '') + (taken ? ' disabled' : '') + '>';
+    }
+    return '<label class="card' + (taken ? ' taken' : '') + (mine ? ' mine' : '') + '">' + box
+      + '<div><div class="n">' + esc(p.name) + '</div><div class="m">' + esc(meta(p)) + '</div>'
+      + (p.by ? '<div class="by">認領：' + esc(p.by) + '</div>' : '') + '</div></label>';
+  }
+  function visitView() {
+    if (isObserver()) {
+      return '<div class="banner2">觀察者沒有服事者身分，沒有「我的回訪」，也不能填寫。'
+        + '<div class="row"><button type="button" class="ghost" data-act="try-visit">嘗試送出回訪（應被拒絕）</button></div></div>';
+    }
+    var list = myPeople();
+    if (!list.length) return '<div class="empty">你還沒有認領任何人。請到認領名單勾選。</div>';
+    var over = list.filter(function (p) { return !p._st.pending && (p._st.overdue > 0 || p._st.never); }).length;
+    var due = list.filter(function (p) { return !p._st.pending && p._st.overdue === 0 && !p._st.never; }).length;
+    var ok = list.filter(function (p) { return !p._st.pending; }).length - over - due;
+    var html = '<div class="sum"><div class="s1"><b>' + over + '</b><span>逾期／未回訪</span></div><div class="s2"><b>' + due + '</b><span>今天到期</span></div><div class="s3"><b>' + ok + '</b><span>按時中</span></div></div>';
+    html += list.map(function (p) {
+      var st = p._st;
+      var pill = st.pending ? ['pending','p-pending','出席待核實'] : st.never ? ['due','p-over','尚未回訪'] : st.overdue > 0 ? ['over','p-over','逾期 ' + st.overdue + ' 天'] : st.overdue === 0 ? ['due','p-due','今天到期'] : ['ok','p-ok','下次 ' + md(st.due)];
+      var last = st.last ? '上次 ' + md(st.last.date) + '（' + st.last.status + '）' : '還沒有回訪紀錄';
+      return '<button type="button" class="vcard ' + pill[0] + '" data-act="open-visit" data-id="' + esc(p.id) + '" style="width:calc(100% - 24px);text-align:left">'
+        + '<div class="tier" style="background:var(--' + color(p.tier) + ')">' + esc(mark(p.tier)) + '</div>'
+        + '<div><div class="n">' + esc(p.name) + '</div><div class="m">' + esc(p.district + '・' + p.group + '・' + last) + '</div></div>'
+        + '<span class="pill ' + pill[1] + '">' + esc(pill[2]) + '</span></button>';
+    }).join('');
+    html += '<p class="subnote">回訪週期：A 每週、B 每月、C 每兩週、D 每月。待核實可記入，但不進抽樣。</p>';
+    if (ui.form) html += formHtml(ui.form);
+    return html;
+  }
+  function formHtml(form) {
+    var p = findPerson(form.personId);
+    if (!p) return '';
+    var st = statusOf(p);
+    var today = taipeiToday();
+    function chips(field, opts, cur) {
+      return '<div class="chips">' + opts.map(function (o) {
+        return '<button type="button" data-act="chip" data-field="' + field + '" data-value="' + esc(o) + '" class="' + (cur === o ? 'on' : '') + '">' + esc(o) + '</button>';
+      }).join('') + '</div>';
+    }
+    var hist = st.history.length ? st.history.map(function (h) {
+      return '<div class="h"><b>' + esc(md(h.date)) + '</b>・' + esc(h.method) + '・' + esc(h.status) + '・' + esc(h.saint)
+        + (h.note ? '<div>' + esc(h.note) + '</div>' : '') + '</div>';
+    }).join('') : '<div class="h">還沒有紀錄</div>';
+    var cycle = st.pending ? '出席待核實，不排程' : ('每 ' + st.cycle + ' 天');
+    return '<div class="mask"><div class="sheet"><h3>' + esc(p.name) + '</h3>'
+      + '<div class="m">' + esc(p.district + '・' + p.group + '・' + cycle) + '</div>'
+      + '<label class="n" style="font-size:16px">回訪日期</label><input id="visit-date" type="date" value="' + esc(form.date || today) + '" max="' + today + '">'
+      + '<div class="n" style="font-size:16px;margin-top:10px">方式</div>' + chips('method', METHODS, form.method)
+      + '<div class="n" style="font-size:16px;margin-top:10px">狀況</div>' + chips('status', STATUSES, form.status)
+      + '<label class="n" style="font-size:16px">備註</label><textarea id="visit-note" rows="3" maxlength="200" placeholder="虛構近況即可">' + esc(form.note || '') + '</textarea>'
+      + '<div class="row"><button type="button" class="ghost" data-act="close-form" style="flex:1">取消</button>'
+      + '<button type="button" class="primary" data-act="save-visit" style="flex:1">送出回訪</button></div>'
+      + '<h3 style="margin-top:16px;font-size:16px">最近紀錄</h3>' + hist + '</div></div>';
+  }
+  function sampleView() {
+    var drawn = ui.draw;
+    var kindName = ui.sampleKind === 'group' ? '群組未認領推薦' : '個人已認領回訪';
+    var html = '<div class="panel"><div class="seg" style="padding:0">'
+      + '<button type="button" data-act="sample-kind" data-kind="group" class="' + (ui.sampleKind === 'group' ? 'on' : '') + '">群組未認領推薦</button>'
+      + '<button type="button" data-act="sample-kind" data-kind="personal" class="' + (ui.sampleKind === 'personal' ? 'on' : '') + '">個人已認領回訪</button></div>'
+      + '<p class="m">暫定假設，可再調整：兩種分開抽。比例 A 2、B 2、C 或 D 合計 4。池不足只顯示實際人數，不重複、不跨級補齊。待核實不進 C/D。</p>'
+      + '<label class="m"><input id="short" type="checkbox" data-act="short"' + (ui.short ? ' checked' : '') + '> 改用不足的示範池（A 只留 1、B 留 0、C/D 只留 1）</label>'
+      + '<div class="row"><button type="button" class="primary" data-act="resample">重新抽樣</button></div></div>';
+    html += '<div class="warn">正式系統的每週推播說明是台北時間週一、四、六 09:00，個人與兩個群組同一時段。Apps Script 的 nearMinute 不保證準時 09:00。這一頁只顯示說明，沒有建立觸發，也不能用來證明正式排程已生效。今天是週' + weekdayName(taipeiToday()) + '，若在正式系統，下一個說明中的推播日是 ' + nextRun(taipeiToday()) + '。</div>';
+    if (!drawn) return html + '<div class="empty">按「重新抽樣」預覽。群組抽未認領的人；個人抽你已認領且到了回訪週期的人。</div>';
+    var pendingIn = drawn.list.filter(function (p) { return p.attendanceStatus === 'pending' || p.tier === '待核實'; }).length;
+    var dup = uniqueOk(drawn.list) ? '這次沒有重複' : '有重複';
+    html += '<div class="panel sample"><div class="countline">' + esc(kindName) + '：A ' + drawn.A.length + '、B ' + drawn.B.length + '、C/D ' + drawn.CD.length + '，共 ' + drawn.list.length + ' 位</div>'
+      + '<div class="m">池內 A ' + drawn.pool.A + '（要 2）、B ' + drawn.pool.B + '（要 2）、C 或 D ' + drawn.pool.CD + '（要 4）。' + dup + '。待核實混入 ' + pendingIn + ' 位。</div>';
+    if (!drawn.list.length) html += '<div class="empty">這個池是空的，所以不顯示名單，也不用其他級距補滿。</div>';
+    html += drawn.list.map(function (p) {
+      return '<div class="m"><b>' + esc(mark(p.tier)) + '</b>　' + esc(p.name) + '・' + esc(p.district) + '・' + esc(p.group) + '</div>';
+    }).join('') + '</div>';
+    return html;
+  }
+  function repairView() {
+    var report = repairDryRun();
+    var html = '<div class="banner2">這是沙盒裡的虛構占用。dry-run 不會改資料。確認解除也只改這份示範，不會碰到真實綁定，也不能代替正式修復。</div>';
+    html += '<div class="panel"><div class="n">示範服事者丙</div>'
+      + '<div class="m">占用狀態：' + (state.occupied.active ? '被「示範占用顯示名」占用' : '沙盒內已解除占用') + '</div>'
+      + '<div class="m">名下虛構認領 ' + report.claimCount + ' 筆'
+      + (report.claims.length ? '：' + esc(report.claims.join('、')) : '') + '</div>'
+      + '<div class="m">回訪 ' + report.visitCount + ' 筆</div>'
+      + '<div class="row"><button type="button" class="ghost" data-act="repair-dry" style="flex:1">dry-run（不寫入）</button></div></div>';
+    if (ui.repairPreview) {
+      html += '<div class="toast' + (ui.repairPreview.wrote ? '' : '') + '">dry-run：wrote = false。顯示名稱 '
+        + esc(ui.repairPreview.displayName || '（目前沒有占用）') + '，認領 ' + ui.repairPreview.claimCount
+        + '，回訪 ' + ui.repairPreview.visitCount + '。資料沒有改。</div>';
+    }
+    html += '<div class="panel"><label class="n" style="font-size:16px">輸入顯示名稱才可解除</label>'
+      + '<input id="repair-name" type="text" value="' + esc(ui.repairName) + '" placeholder="示範占用顯示名" autocomplete="off">'
+      + '<label class="m"><input id="repair-arm" type="checkbox" data-act="repair-arm"' + (ui.repairArmed ? ' checked' : '') + '> 我知道這只改沙盒裡的虛構資料</label>'
+      + '<div class="row"><button type="button" class="primary" data-act="repair-go">確認解除占用</button></div>'
+      + '<p class="m">顯示名稱不符就不會改。解除後，示範服事者丙名下的認領仍要留著。</p></div>'
+      + '<div class="row" style="margin:0 12px"><button type="button" class="ghost" data-act="reset" style="flex:1">重設示範資料</button></div>';
+    return html;
+  }
+
+  document.body.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var act = t.getAttribute('data-act');
+    if (act === 'role') {
+      state.role = t.getAttribute('data-role');
+      ui.pick = {}; ui.drop = {}; ui.form = null; ui.draw = null;
+      saveState(state);
+      toast(isObserver() ? '已切到觀察者。寫入會被沙盒拒絕。' : ('已切到 ' + state.role + '。這不是 LINE 綁定。'), false);
+      return;
+    }
+    if (act === 'mode') { ui.mode = t.getAttribute('data-mode'); ui.toast = ''; render(); return; }
+    if (act === 'tab') { ui.tab = t.getAttribute('data-tab'); ui.q = ''; render(); return; }
+    if (act === 'submit-claims') {
+      var res = applyClaims();
+      if (!res.ok) { toast(res.error, true); return; }
+      var msg = '已認領 ' + res.claimed + ' 位' + (res.released ? '，取消 ' + res.released + ' 位' : '');
+      if (res.skipped.length) msg += '。未成功：' + res.skipped.join('、');
+      toast(msg, false);
+      return;
+    }
+    if (act === 'try-write') {
+      var before = state.people.filter(function (p) { return p.by; }).length;
+      var denied = applyClaims();
+      if (!denied.ok && state.people.filter(function (p) { return p.by; }).length === before) toast(denied.error, true);
+      return;
+    }
+    if (act === 'try-visit') {
+      var deniedV = saveVisit('A01', taipeiToday(), '電話', '順利聯繫', '不該寫入');
+      toast(deniedV.error || '未拒絕', !deniedV.ok);
+      return;
+    }
+    if (act === 'open-visit') {
+      if (writerError()) { toast(READONLY_MSG, true); return; }
+      ui.form = { personId: t.getAttribute('data-id'), date: taipeiToday(), method: '', status: '', note: '' };
+      render();
+      return;
+    }
+    if (act === 'close-form') { ui.form = null; render(); return; }
+    if (act === 'chip' && ui.form) { ui.form[t.getAttribute('data-field')] = t.getAttribute('data-value'); render(); return; }
+    if (act === 'save-visit' && ui.form) {
+      var dateEl = document.getElementById('visit-date');
+      var noteEl = document.getElementById('visit-note');
+      var saved = saveVisit(ui.form.personId, dateEl ? dateEl.value : ui.form.date, ui.form.method, ui.form.status, noteEl ? noteEl.value : ui.form.note);
+      if (!saved.ok) { toast(saved.error, true); return; }
+      ui.form = null;
+      toast('回訪已存在這份沙盒。重新開啟這個檔案應還看得到。', false);
+      return;
+    }
+    if (act === 'sample-kind') { ui.sampleKind = t.getAttribute('data-kind'); ui.draw = null; render(); return; }
+    if (act === 'resample') { resample(); ui.toast = ''; render(); return; }
+    if (act === 'repair-dry') { ui.repairPreview = repairDryRun(); ui.toast = ''; render(); return; }
+    if (act === 'repair-go') {
+      if (!ui.repairArmed) { toast('請先勾選「只改沙盒」。', true); return; }
+      var nameEl = document.getElementById('repair-name');
+      var out = repairConfirm(nameEl ? nameEl.value : ui.repairName);
+      if (!out.ok) { toast(out.error, true); return; }
+      toast('沙盒已解除占用。虛構認領仍有 ' + out.claimCount + ' 筆：' + out.claims.join('、') + '。這不是正式修復。', false);
+      return;
+    }
+    if (act === 'reset') {
+      clearStore();
+      state = makeSeed();
+      saveState(state);
+      ui = { mode: 'claim', tab: 'A 優先', q: '', district: '', pick: {}, drop: {}, form: null, sampleKind: 'group', short: false, draw: null, repairName: '', repairArmed: false, toast: '已重設為初始示範資料。', toastBad: false };
+      render();
+    }
+  });
+  document.body.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.getAttribute('data-act') === 'pick') {
+      var id = t.getAttribute('data-id');
+      var p = findPerson(id);
+      if (!p || writerError()) { t.checked = false; toast(READONLY_MSG, true); return; }
+      if (p.by === state.role) { if (t.checked) delete ui.drop[id]; else ui.drop[id] = 1; }
+      else if (!p.by) { if (t.checked) ui.pick[id] = 1; else delete ui.pick[id]; }
+      var c = document.getElementById('cnt');
+      if (c) c.textContent = String(myCount());
+      return;
+    }
+    if (t.id === 'district') { ui.district = t.value; render(); return; }
+    if (t.getAttribute('data-act') === 'short') { ui.short = t.checked; ui.draw = null; render(); return; }
+    if (t.getAttribute('data-act') === 'repair-arm') { ui.repairArmed = t.checked; }
+  });
+  document.body.addEventListener('input', function (e) {
+    if (e.target.id === 'q') { ui.q = e.target.value.trim(); render(); }
+    if (e.target.id === 'repair-name') ui.repairName = e.target.value;
+    if (e.target.id === 'visit-date' && ui.form) ui.form.date = e.target.value;
+    if (e.target.id === 'visit-note' && ui.form) ui.form.note = e.target.value;
+  });
+
+  window.__SANDBOX__ = {
+    get state() { return state; },
+    get ui() { return ui; },
+    get net() { return NET.slice(); },
+    persistKind: function () { return persistKind; },
+    setRole: function (role) { state.role = role; saveState(state); render(); },
+    applyClaims: applyClaims,
+    saveVisit: saveVisit,
+    drawSample: drawSample,
+    poolsFrom: poolsFrom,
+    repairDryRun: repairDryRun,
+    repairConfirm: repairConfirm,
+    reset: function () { clearStore(); state = makeSeed(); saveState(state); render(); },
+    resample: resample,
+    findPerson: findPerson,
+    BLOCK_MSG: READONLY_MSG
+  };
+  render();
+})();
+</script>
+</body>
+</html>
