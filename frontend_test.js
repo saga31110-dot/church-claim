@@ -46,7 +46,8 @@ assert(htmlOut.includes('type="checkbox"'));
 assert(htmlOut.includes('確認認領'));
 assert(htmlOut.includes('>B 穩定<'));
 assert(htmlOut.includes('週一、四、六'));
-assert(htmlOut.includes('未認領推薦') && htmlOut.includes('本人已認領回訪'));
+assert(htmlOut.includes('已認領回訪推薦') && htmlOut.includes('本人已認領回訪'));
+assert(!htmlOut.includes('未認領推薦'));
 
 window.liff = { getIDToken: () => 'tok' };
 window.fetch = async () => ({ json: async () => ({ ok: true, today: '2026-11-09', people: [
@@ -58,6 +59,41 @@ setTimeout(() => {
   const visitHtml = app.innerHTML;
   assert(visitHtml.includes('B 每月'));
   assert(visitHtml.includes('待核實可記入回訪'));
+  S.visits = [
+    { key: '2-4|同名|1', name: '同名', group: '一', tier: 'A', district: '2-4', cycle: 7, never: false, overdue: 1, due: '2026-11-08', pending: false, attendanceStatus: 'verified', history: [{ date: '2026-11-01', method: '見面', status: '順利聯繫', saint: '管理者', note: '私密一' }] },
+    { key: '2-4|同名|2', name: '同名', group: '二', tier: 'A', district: '2-4', cycle: 7, never: true, overdue: 0, due: '2026-11-09', pending: false, attendanceStatus: 'verified', history: [{ date: '2026-11-02', method: '電話', status: '未聯繫上', saint: '管理者', note: '私密二' }] }
+  ];
+  S.today = '2026-11-09';
+  S.deepKey = '2-4|同名|2';
+  S.deepOpened = '';
+  S.deepMiss = false;
+  S.readOnly = false;
+  window.__APP__.openDeepVisit();
+  let mask = window.document.querySelector('.mask');
+  assert(mask && mask.innerHTML.includes('二') && mask.innerHTML.includes('私密二') && !mask.innerHTML.includes('私密一'));
+  window.__APP__.openForm(S.visits[0]);
+  assert(window.document.querySelectorAll('.mask').length === 1);
+  mask = window.document.querySelector('.mask');
+  assert(mask.innerHTML.includes('私密一') && !mask.innerHTML.includes('私密二'));
+  S.deepKey = '2-6|別人|1';
+  S.deepOpened = '';
+  window.__APP__.openDeepVisit();
+  assert(!window.document.querySelector('.mask'));
+  assert(app.innerHTML.includes('這位不是您認領的'));
+  assert(!app.innerHTML.includes('私密一') && !app.innerHTML.includes('私密二'));
+  S.readOnly = true;
+  S.role = 'observer';
+  S.deepKey = '2-4|同名|2';
+  window.__APP__.openForm(S.visits[1]);
+  assert(!window.document.querySelector('.mask'));
+  S.mode = 'claim';
+  window.__APP__.render();
+  assert(app.innerHTML.includes('觀察者模式不能填寫回訪'));
+  S.readOnly = false;
+  S.role = 'saint';
+  const srcLogin = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert(srcLogin.includes('liff.login({redirectUri: location.href})'));
+  assert(srcLogin.includes("q.get('k')"));
   const src = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   assert(src.includes("const LIFF_ID = '2012397222-u2XpUCRQ'"));
   assert(src.includes('https://script.google.com/macros/s/AKfycbwo0W9wULIyYuVlmJq9u2EDvFmMJH6DP2kwj-s1NIYrMRCY3WgThjrTSyInuRGpQHFzzw/exec'));

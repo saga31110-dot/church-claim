@@ -82,7 +82,7 @@ assert(/加減約 15 分鐘/.test(ctx.CONFIG.SCHEDULE_NOTE)&&/08:45/.test(ctx.CO
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.A,2);
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.B,2);
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.CD,4);
-assert(ctx.SAMPLE_SPEC.groupPool==='未認領推薦'&&ctx.SAMPLE_SPEC.personalPool==='本人已認領回訪');
+assert(ctx.SAMPLE_SPEC.groupPool==='已認領回訪推薦'&&ctx.SAMPLE_SPEC.personalPool==='本人已認領回訪');
 assert(ctx.SAMPLE_SPEC.assumption.includes('待教授調整'));
 assert.strictEqual(ctx.WEEK_HEADERS.length,43);
 assert.strictEqual(ctx.WEEK_HEADERS[0],'2025-12-29');
@@ -261,8 +261,8 @@ const firstGroup=JSON.stringify(pushes[0].messages);
 assert(log().some(l=>l[1]==='群組抽樣'&&l[2]==='2-4柱子們'&&l[5]==='失敗'&&/找不到這個群組的 ID/.test(l[6])));
 assert(!pushes.some(p=>p.to==='Cother'));
 const gb=JSON.stringify(pushes[0].messages[0].contents);
-assert(gb.includes('未認領推薦')&&gb.includes('2012397222-u2XpUCRQ')&&!gb.includes('回訪總覽')&&!gb.includes('還在等人認領'));
-ok('one group missing → logged, the other gets the shared unclaimed sample');
+assert(gb.includes('已認領回訪推薦')&&gb.includes('2012397222-u2XpUCRQ')&&!gb.includes('未認領推薦')&&!gb.includes('暫定假設')&&!gb.includes('這不是完整名單')&&!gb.includes('回訪總覽')&&!gb.includes('還在等人認領'));
+ok('one group missing → logged, the other gets the shared claimed sample');
 hook({destination:'UbotJoseph',events:[gev('join','Cpillar')]},K);
 pushes.length=0;assert.strictEqual(ctx.pushGroupReminder(),1);eqJ(pushes.map(p=>p.to),['Cpillar']);
 assert.strictEqual(JSON.stringify(pushes[0].messages),firstGroup);ok('same-day second group reuses the sample and does not resend the first group');
@@ -573,10 +573,10 @@ assert.strictEqual(sortSs.bag['A 優先'].v.find(row=>row[0]==='甲')[4],'管理
 const crowd=[];
 for(let i=0;i<20;i++) crowd.push({tier:'D',attendanceStatus:'verified',tab:'D 全年未出席',key:'n'+i,name:'名'+i,group:'g'});
 const shown=ctx.drawSample_(ctx.poolsFrom_(crowd),ctx.SAMPLE_SPEC.counts,()=>0);
-const shownText=JSON.stringify(ctx.sampleBubble_('未認領推薦','預覽',shown.list,'打開小頁面','https://liff.line.me/2012397222-u2XpUCRQ'));
-shown.list.forEach(p=>assert(shownText.includes(p.name)));
+const shownText=JSON.stringify(ctx.sampleBubble_('已認領回訪推薦','預覽',shown.list,'打開小頁面','https://liff.line.me/2012397222-u2XpUCRQ'));
+shown.list.forEach(p=>assert(shownText.includes(p.name)&&shownText.includes('k='+encodeURIComponent(p.key))));
 crowd.filter(p=>shown.list.indexOf(p)<0).forEach(p=>assert(!shownText.includes(p.name)));
-assert(!shownText.includes('另外')&&!shownText.includes('未認領 20'));ok('sample bubble lists only the draw, not the rest of the unclaimed pool');
+assert(!shownText.includes('另外')&&!shownText.includes('未認領')&&!shownText.includes('暫定假設')&&!shownText.includes('這不是完整名單')&&!shownText.includes('池不足不跨級補齊'));ok('sample bubble lists only the draw, links each stable id, and has no gray copy');
 
 const emptySs=makeSs({'待核實':[HH,['人','g',0,43,'']],'群組紀錄':[['記錄時間','事件類型','groupId／roomId／userId','來源類型','事件時間']]});
 props.GROUP_PUSH_ENABLED='true';setNow('2026-12-07');
@@ -677,5 +677,52 @@ confirmThrew=false;
 try{ctx.restoreConfirm();}catch(e){confirmThrew=true;}
 assert(confirmThrew&&!props.RESTORE_CONFIRM&&ctx._log.some(l=>l.includes('backup-id')&&l.includes('"wrote":false')));ok('restore completion is logged as not written when it stops');
 ['SHEET_ID','SOURCE_24_SHEET_ID','SOURCE_26_SHEET_ID','SOURCE_27_SHEET_ID','MIGRATION_MANIFEST_JSON','MIGRATION_CONFIRM','MIGRATION_FINGERPRINT'].forEach(k=>{if(savedConfirmProps[k]==null)delete props[k];else props[k]=savedConfirmProps[k];});
+
+const IH=['穩定ID','認領者','分頁','分級','姓名','出席狀態','有效','併入','群組'];
+const idxSs=makeSs({'名單索引':[IH,
+  ['2-4|同名|1','管理者','A 優先','A','同名','verified','Y','','一'],
+  ['2-4|同名|2','聖徒二','A 優先','A','同名','verified','Y','','二'],
+  ['2-4|同名|1','管理者','A 優先','A','同名','verified','Y','','一'],
+  ['2-4|未|1','','A 優先','A','未','verified','Y','','三'],
+  ['2-6|待|1','管理者','待核實','待核實','待','pending','Y','','四'],
+  ['2-4|停|1','管理者','A 優先','A','停','verified','N','','五'],
+  ['2-4|併|1','管理者','A 優先','A','併','verified','Y','2-4|同名|1','六']
+]});
+const mergedPool=ctx.claimedGroupPool_(idxSs).map(p=>p.stableId).sort();
+assert.strictEqual(JSON.stringify(mergedPool),JSON.stringify(['2-4|同名|1','2-4|同名|2']));
+const shortDraw=ctx.drawSample_(ctx.poolsFrom_(ctx.claimedGroupPool_(idxSs)),ctx.SAMPLE_SPEC.counts,()=>0);
+assert.strictEqual(shortDraw.A.length,2);assert.strictEqual(shortDraw.B.length,0);assert.strictEqual(shortDraw.CD.length,0);
+withSs(idxSs,()=>{
+  const planned=ctx.planPersonalSamples_(idxSs,'2026-12-07',()=>0);
+  const mine=(planned.samples['管理者'].list||[]).map(p=>p.stableId||p.key);
+  assert(mine.includes('2-4|同名|1')&&!mine.includes('2-4|同名|2')&&!mine.includes('2-4|未|1')&&!mine.includes('2-6|待|1'));
+});
+ok('group pool merges claimers by stable id and personal sampling stays with that person');
+
+const poolSs=makeSs({
+  'A 優先':[HH,['同名','一',5,4,'管理者'],['同名','二',5,4,'聖徒二'],['未認','三',5,4,'']],
+  'B 穩定':[HH],'C 近期斷線':[HH,['丙','g',1,20,'管理者']],'D 全年未出席':[HH],
+  '待核實':[HH,['待核','g',0,43,'管理者']],
+  '群組紀錄':[['記錄時間','事件類型','groupId／roomId／userId','來源類型','事件時間'],['t','message','Cgood','group','t']],
+  '抽樣紀錄':[['日期','池','對象','名單鍵','狀態'],['2026-12-07','未認領推薦','*',JSON.stringify(['A 優先|4']),'已抽出']]
+});
+props.GROUP_PUSH_ENABLED='true';setNow('2026-12-07');pushes.length=0;
+withSs(poolSs,()=>{
+  assert.strictEqual(ctx.pushGroupReminder(),1);
+  call({action:'bind',idToken:'tok1',saint:'管理者'});
+  call({action:'bind',idToken:'tok2',saint:'聖徒二'});
+  const denied=call({action:'record',idToken:'tok2',key:'A 優先|2',name:'同名',date:'2026-12-07',method:'電話',status:'順利聯繫'});
+  assert(!denied.ok&&/不是您認領/.test(denied.error));
+  call({action:'bindObserver',idToken:'tok9'});
+  const obs=call({action:'record',idToken:'tok9',key:'A 優先|2',name:'同名',date:'2026-12-07',method:'電話',status:'順利聯繫'});
+  assert(!obs.ok&&/觀察者/.test(obs.error));
+});
+const sentBody=JSON.stringify(pushes[0].messages);
+assert(sentBody.includes('已認領回訪推薦'));
+assert(sentBody.includes('k='+encodeURIComponent('A 優先|2'))&&sentBody.includes('k='+encodeURIComponent('A 優先|3')));
+assert(!sentBody.includes(encodeURIComponent('A 優先|4'))&&!sentBody.includes('未認領推薦')&&!sentBody.includes('暫定假設')&&!sentBody.includes('這不是完整名單'));
+assert(poolSs.bag['抽樣紀錄'].v.some(r=>r[1]==='未認領推薦'&&String(r[3]).includes('A 優先|4')));
+assert(poolSs.bag['抽樣紀錄'].v.some(r=>r[1]==='已認領回訪推薦'&&!String(r[3]).includes('A 優先|4')));
+ok('old unclaimed sample cache is kept but does not drive the new claimed draw');
 
 console.log('\nALL BACKEND TESTS PASSED');
