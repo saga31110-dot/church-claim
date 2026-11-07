@@ -15,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-release-6';
+var API_VERSION = '2026-11-release-7';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -1144,7 +1144,8 @@ function legacySnapshotDetail_(ss, plan) {
       var r = values[p.row - 1];
       var raw = r[0] == null ? '' : String(r[0]);
       var planName = p.name == null ? '' : String(p.name);
-      if (raw !== planName) { nameMismatch++; if (raw.trim() === planName) trimOnly++; }
+      if (raw.trim() !== planName.trim()) nameMismatch++;
+      else if (raw !== planName) trimOnly++;
       if ((r[4] || '') !== (p.by || '')) claimMismatch++;
     });
   });
@@ -1262,7 +1263,9 @@ function validateLegacySnapshot_(ss, plan) {
     var sh = ss.getSheetByName(p.tab);
     if (!sh || p.row > sh.getLastRow()) { bad = '原分頁列號已變'; return; }
     var r = sh.getRange(p.row, 1, 1, CONFIG.CLAIM_COL).getValues()[0];
-    if (r[0] !== p.name) bad = '原分頁姓名已變，中止以免錯接';
+    var rawName = r[0] == null ? '' : String(r[0]);
+    var planName = p.name == null ? '' : String(p.name);
+    if (rawName.trim() !== planName.trim()) bad = '原分頁姓名已變，中止以免錯接';
     else if ((r[4] || '') !== (p.by || '')) bad = '原分頁認領已變，中止';
   });
   return bad;
