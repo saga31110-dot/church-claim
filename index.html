@@ -62,7 +62,7 @@ const TABS = [['A 優先','A'],['B 穩定','B'],['C 近期斷線','C'],['D 全�
 const FILTER_TABS = {'D 全年未出席':1,'待核實':1};
 const METHODS = ['見面','電話','LINE','其他'];
 const STATUSES = ['順利聯繫','未聯繫上','有需要代禱','願意來聚會'];
-const S = {saint:null,data:null,mode:'claim',tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:'',visits:null,today:'',friend:null,role:null,readOnly:false};
+const S = {saint:null,data:null,mode:'claim',tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:'',visits:null,today:'',friend:null,role:null,readOnly:false,deepKey:'',deepMiss:false,deepOpened:''};
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
 const md = s => s ? (+s.slice(5,7))+'/'+(+s.slice(8,10)) : '';
@@ -83,13 +83,15 @@ function msg(t){ $('app').innerHTML = '<div id="msg">'+esc(t)+'</div>'; }
 async function main(){
   try{
     await liff.init({liffId: LIFF_ID});
-    if(!liff.isLoggedIn()){ liff.login(); return; }
+    if(!liff.isLoggedIn()){ liff.login({redirectUri: location.href}); return; }
     checkFriend();
     const j = await api({action:'init'});
     if(!j.apiVersion) return msg('後端還沒換成這個版本（回應沒有 apiVersion）。請先完成 Apps Script 部署，用瀏覽器打開同一個 /exec 看到 apiVersion 後，再使用這份畫面。現在不要把這份前端換成正式入口。');
     if(!j.bound) return renderBind(j.saints, j.displayName);
     applySession(j);
-    if(!S.readOnly && new URLSearchParams(location.search).get('v')==='1') S.mode='visit';
+    const q = new URLSearchParams(location.search);
+    S.deepKey = q.get('k') || '';
+    if(!S.readOnly && (q.get('v')==='1' || S.deepKey)) S.mode='visit';
     render(); if(!S.readOnly && S.mode==='claim') loadVisits();
   }catch(e){ msg('無法載入：'+e.message); }
 }
@@ -155,7 +157,8 @@ function render(){
     '<div class="filters" style="display:'+(FILTER_TABS[S.tab]?'flex':'none')+'"><input id="q" placeholder="搜尋姓名" value="'+esc(S.q)+'">'+
     '<select id="g"><option value="">全部群組</option>'+groups.map(g=>'<option'+(g===S.g?' selected':'')+'>'+esc(g)+'</option>').join('')+'</select></div></header>'+
     '<div id="friendBox">'+friendHtml()+'</div><main id="list"></main>'+
-    '<p class="note-line">推播暫定為台北時間週一、四、六 09:00 前後約 15 分鐘，不能當成準時。群組抽「未認領推薦」、個人抽「本人已認領回訪」，這裡仍可查完整名單。B 每月回訪；待核實可認領，但不會當成 D 推播。</p>'+
+    '<p class="note-line">推播暫定為台北時間週一、四、六 09:00 前後約 15 分鐘，不能當成準時。群組抽「已認領回訪推薦」、個人抽「本人已認領回訪」，這裡仍可查完整名單。B 每月回訪；待核實可認領，但不會當成 D 推播。</p>'+
+    deepNote()+
     (S.readOnly?'':'<footer><button id="ok">確認認領</button></footer>');
   bindSeg();
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;render();});
@@ -174,14 +177,30 @@ function bindSeg(){
 function list(){
   const L=visible();
   $('list').innerHTML = L.length? L.map(p=>{
-    const mine=!S.readOnly && p.by===S.saint, taken=p.by&&!mine;
+    const mine=!S.readOnly && p.by===S.saint, co=!S.readOnly && p.care==='co', taken=p.by&&!mine;
+    const locked = mine && p.coCount>0;
     const checked = mine ? !S.drop.has(p.key) : S.pick.has(p.key);
-    const box = S.readOnly ? '' : '<input type="checkbox" data-k="'+esc(p.key)+'"'+(checked?' checked':'')+(taken?' disabled':'')+'>';
+    const box = S.readOnly ? '' : '<input type="checkbox" data-k="'+esc(p.key)+'"'+(checked?' checked':'')+(taken||locked?' disabled':'')+'>';
+    const who = mine ? '<div class="by">主要照顧者：'+esc(S.saint)+(p.coCount?'（另有 '+p.coCount+' 位共同照顧者，不能直接取消）':'')+'</div>'
+      : co ? '<div class="by">共同照顧者：'+esc(S.saint)+'；主要：'+esc(p.by)+' <button type="button" class="leave" data-k="'+esc(p.key)+'">退出共同照顧</button></div>'
+      : (p.by?'<div class="by">主要：'+esc(p.by)+(!S.readOnly&&p.stableId?' <button type="button" class="join" data-k="'+esc(p.key)+'">加入共同照顧</button>':'')+'</div>':'');
     return '<label class="card'+(taken?' taken':'')+(mine?' mine':'')+'">'+box+
-      '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+metaLine(p)+'</div>'+
-      (p.by?'<div class="by">認領：'+esc(p.by)+'</div>':'')+'</div></label>';
+      '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+metaLine(p)+'</div>'+who+'</div></label>';
   }).join('') : '<div class="empty">沒有符合的資料</div>';
   if(S.readOnly) return;
+  $('list').querySelectorAll('.join').forEach(b=>b.onclick=async e=>{
+    e.preventDefault(); e.stopPropagation();
+    const p=byKey(b.dataset.k); if(!p) return;
+    try{ const j=await api({action:'joinCare', key:p.key, name:p.name}); S.data=j.data; render(); }
+    catch(err){ alert(err.message); }
+  });
+  $('list').querySelectorAll('.leave').forEach(b=>b.onclick=async e=>{
+    e.preventDefault(); e.stopPropagation();
+    const p=byKey(b.dataset.k); if(!p) return;
+    if(!confirm('退出你自己的共同照顧？不會取消主要認領，也不會刪除回訪紀錄。')) return;
+    try{ const j=await api({action:'leaveCare', key:p.key, name:p.name}); S.data=j.data; S.visits=null; render(); }
+    catch(err){ alert(err.message); }
+  });
   $('list').querySelectorAll('input').forEach(i=>i.onchange=()=>{
     const p=(S.data[S.tab]||[]).find(x=>x.key===i.dataset.k);
     if(!p) return;
@@ -209,7 +228,7 @@ async function loadVisits(){
   if(S.readOnly) return;
   try{
     const j = await api({action:'visits'});
-    S.visits=j.people; S.today=j.today; if(S.mode==='visit'){ renderSegBadge(); vlist(); }
+    S.visits=j.people; S.today=j.today; if(S.mode==='visit'){ renderSegBadge(); vlist(); openDeepVisit(); }
   }catch(e){ if($('vlist')) $('vlist').innerHTML='<div class="empty">無法載入：'+esc(e.message)+'</div>'; }
 }
 function renderSegBadge(){
@@ -230,18 +249,34 @@ function cycleText(p){
 function vlist(){
   const L=S.visits||[];
   const over=L.filter(p=>!isPending(p) && (p.overdue>0||p.never)).length, due=L.filter(p=>!isPending(p) && p.overdue===0 && !p.never).length, ok=L.filter(p=>!isPending(p)).length-over-due;
-  if(!L.length){ $('vlist').innerHTML='<div class="empty">您還沒有認領任何人。<br>請到「📋 認領名單」勾選後再回來填寫回訪。</div>'; return; }
-  $('vlist').innerHTML = '<div class="sum"><div class="s1"><b>'+over+'</b><span>逾期／未回訪</span></div><div class="s2"><b>'+due+'</b><span>今天到期</span></div><div class="s3"><b>'+ok+'</b><span>按時中</span></div></div>'+
+  if(!L.length){ $('vlist').innerHTML=deepNote()+'<div class="empty">您還沒有認領任何人。<br>請到「📋 認領名單」勾選後再回來填寫回訪。</div>'; return; }
+  $('vlist').innerHTML = deepNote()+'<div class="sum"><div class="s1"><b>'+over+'</b><span>逾期／未回訪</span></div><div class="s2"><b>'+due+'</b><span>今天到期</span></div><div class="s3"><b>'+ok+'</b><span>按時中</span></div></div>'+
     L.map((p,i)=>{ const [c,pc,pt]=pill(p);
       return '<div class="vcard '+c+'" data-i="'+i+'"><div class="tier" style="background:var(--'+colorOf(p.tier)+')">'+esc(markOf(p.tier))+'</div>'+
-        '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+esc(p.district?p.district+'・':'')+esc(p.group)+'・'+(p.last?'上次 '+md(p.last)+'（'+esc(p.lastStatus)+'）':'還沒有回訪紀錄')+'</div></div>'+
+        '<div><div class="n">'+esc(p.name)+(p.care==='co'?' <span class="m">共同</span>':'')+'</div><div class="m">'+esc(p.district?p.district+'・':'')+esc(p.group)+'・'+(p.last?'上次 '+md(p.last)+'（'+esc(p.lastStatus)+'）':'還沒有回訪紀錄')+'</div></div>'+
         '<span class="pill '+pc+'">'+pt+'</span></div>'; }).join('')+
     '<div class="empty" style="font-size:14px">回訪週期：A 每週、B 每月、C 每兩週、D 每月。待核實可記入回訪，但不排程推播。個人推播是「本人已認領回訪」的暫定抽樣。</div>';
   $('vlist').querySelectorAll('.vcard').forEach(d=>d.onclick=()=>openForm(L[+d.dataset.i]));
 }
 function chips(id, opts){ return '<div class="chips" id="'+id+'">'+opts.map(o=>'<button type="button" data-v="'+esc(o)+'">'+esc(o)+'</button>').join('')+'</div>'; }
+function deepNote(){
+  if(!S.deepKey) return '';
+  if(S.readOnly) return '<div class="banner">觀察者模式不能填寫回訪，也不顯示回訪紀錄。</div>';
+  if(S.deepMiss) return '<div class="banner">你目前沒有這位的照顧關係，無法填寫回訪，也不顯示回訪紀錄。</div>';
+  return '';
+}
+function openDeepVisit(){
+  if(!S.deepKey || S.readOnly) return;
+  const p = (S.visits||[]).find(x => x.key === S.deepKey);
+  if(!p){ S.deepMiss = true; document.querySelectorAll('.mask').forEach(n => n.remove()); if($('vlist')) vlist(); return; }
+  S.deepMiss = false;
+  if(S.deepOpened === S.deepKey) return;
+  S.deepOpened = S.deepKey;
+  openForm(p);
+}
 function openForm(p){
   if(S.readOnly){ alert('觀察者模式不能填寫回訪'); return; }
+  document.querySelectorAll('.mask').forEach(n => n.remove());
   const today = S.today || taipeiToday();
   const F = {method:'',status:''};
   const m = document.createElement('div'); m.className='mask';
@@ -275,6 +310,6 @@ function openForm(p){
   };
 }
 window.S = S;
-window.__APP__ = { render: render, list: list, submit: submit, openForm: openForm, applySession: applySession, isPending: isPending };
+window.__APP__ = { render: render, list: list, submit: submit, openForm: openForm, openDeepVisit: openDeepVisit, applySession: applySession, isPending: isPending };
 if (typeof window !== 'undefined' && !window.__TEST__) main();
 </script></body></html>

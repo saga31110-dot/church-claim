@@ -33,6 +33,7 @@ var CONFIG = {
   MERGE_TAB: '合併紀錄',
   SAMPLE_TAB: '抽樣紀錄',
   REPAIR_TAB: '修復紀錄',
+  COCARE_TAB: '共同照顧',
   CLAIM_COL: 5,
   STABLE_COL: 6,
   METHODS: ['見面', '電話', 'LINE', '其他'],
@@ -65,7 +66,7 @@ var ROSTER_MANIFEST_V1 = {
 var EXPECTED_IMPORT = ROSTER_MANIFEST_V1;
 var SAMPLE_SPEC = {
   assumption: '暫定假設（待教授調整）：群組推播抽「未認領推薦」，個人推播抽「本人已認領回訪」，兩種分開抽。比例 A 2 位、B 2 位、C 或 D 合計 4 位。池不足只顯示實際人數，不重複、不跨級補齊；出席待核實不納入 C/D。',
-  groupPool: '未認領推薦',
+  groupPool: '已認領回訪推薦',
   personalPool: '本人已認領回訪',
   counts: { A: 2, B: 2, CD: 4 }
 };
@@ -112,7 +113,7 @@ function adminUserId_() {
 function doGet() {
   return ContentService.createTextOutput(JSON.stringify({
     ok: true, service: '回訪認領 API', apiVersion: API_VERSION,
-    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1']
+    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'co-care', 'claimed-group-sample']
   })).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
@@ -153,6 +154,12 @@ function handle_(req, user) {
     case 'submit':
       assertWriter_(acc);
       return submit_(ss, acc.saint, req.claims || [], req.releases || []);
+    case 'joinCare':
+      assertWriter_(acc);
+      return joinCare_(ss, acc.saint, req.key, req.name);
+    case 'leaveCare':
+      assertWriter_(acc);
+      return leaveCare_(ss, acc.saint, req.key, req.name);
     case 'visits':
       assertWriter_(acc);
       return { ok: true, today: today_(), people: myVisits_(ss, acc.saint) };
@@ -177,9 +184,9 @@ function initPayload_(ss, acc, user) {
   };
   if (!acc) return Object.assign(base, { bound: false, role: null, readOnly: false, saint: null, data: null });
   if (acc.role === 'observer') {
-    return Object.assign(base, { bound: true, role: 'observer', readOnly: true, saint: null, data: readAll_(ss) });
+    return Object.assign(base, { bound: true, role: 'observer', readOnly: true, saint: null, data: withCare_(ss, readAll_(ss), '') });
   }
-  return Object.assign(base, { bound: true, role: 'saint', readOnly: false, saint: acc.saint, data: readAll_(ss) });
+  return Object.assign(base, { bound: true, role: 'saint', readOnly: false, saint: acc.saint, data: withCare_(ss, readAll_(ss), acc.saint) });
 }
 function assertWriter_(acc) {
   if (!acc || acc.role !== 'saint' || !acc.saint) throw new Error('觀察者模式或未綁定不能認領或填寫回訪');
@@ -600,9 +607,15 @@ function submit_(ss, saint, claims, releases) {
       var p = resolvePerson_(ss, c.key);
       if (p.name !== c.name) { conflicts.push({ key: c.key, name: c.name, reason: '資料已變動' }); return; }
       if (p.by === saint) {
+        if (p.stableId && activeCoNames_(ss, p.stableId).length) {
+          conflicts.push({ key: c.key, name: c.name, reason: '仍有共同照顧者，主要不能退出。系統不會自動改主要，也不會解除其他人。' });
+          return;
+        }
         writeClaimCell_(ss, p, '');
         updateIndexClaim_(ss, p.stableId, '');
         released.push(p.stableId || c.key);
+      } else if (p.stableId && isActiveCoCare_(ss, p.stableId, saint)) {
+        conflicts.push({ key: c.key, name: c.name, reason: '共同照顧者不能取消主要認領，只能退出自己的共同照顧。' });
       }
     });
     claims.forEach(function (c) {
@@ -616,7 +629,81 @@ function submit_(ss, saint, claims, releases) {
     });
     SpreadsheetApp.flush();
   } finally { lock.releaseLock(); }
-  return { ok: true, claimed: done, released: released, conflicts: conflicts, data: readAll_(ss) };
+  return { ok: true, claimed: done, released: released, conflicts: conflicts, data: withCare_(ss, readAll_(ss), saint) };
+}
+function readCoCareRows_(ss) {
+  var sh = ss.getSheetByName(CONFIG.COCARE_TAB);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var v = sh.getDataRange().getValues(), out = [];
+  for (var i = 1; i < v.length; i++) {
+    if (!v[i][0] || !v[i][1]) continue;
+    out.push({ row: i + 1, id: String(v[i][0]), saint: String(v[i][1]), status: String(v[i][3] || '') });
+  }
+  return out;
+}
+function activeCoNames_(ss, stableId) {
+  var out = [];
+  readCoCareRows_(ss).forEach(function (r) { if (r.id === stableId && r.status === '共同') out.push(r.saint); });
+  return out;
+}
+function isActiveCoCare_(ss, stableId, saint) {
+  return !!(stableId && saint && activeCoNames_(ss, stableId).indexOf(saint) >= 0);
+}
+function withCare_(ss, data, saint) {
+  var active = {};
+  readCoCareRows_(ss).forEach(function (r) {
+    if (r.status !== '共同') return;
+    (active[r.id] = active[r.id] || []).push(r.saint);
+  });
+  Object.keys(data || {}).forEach(function (tab) {
+    (data[tab] || []).forEach(function (p) {
+      var names = active[p.stableId] || [];
+      p.coCount = names.length;
+      p.coNames = names.slice();
+      p.care = saint && p.by === saint ? 'primary' : (saint && p.stableId && names.indexOf(saint) >= 0 ? 'co' : '');
+    });
+  });
+  return data;
+}
+function careData_(ss, saint) { return withCare_(ss, readAll_(ss), saint); }
+function joinCare_(ss, saint, key, name) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var p = resolvePerson_(ss, key);
+    if (p.name !== name) return { ok: false, wrote: false, error: '資料已變動，請重新整理' };
+    if (!p.stableId) return { ok: false, wrote: false, error: '這筆還沒有穩定ID，不能加入共同照顧' };
+    if (p.active === 'N' || p.mergedInto) return { ok: false, wrote: false, error: '這筆已合併，不能加入' };
+    if (!p.by) return { ok: false, wrote: false, error: '這位還沒有主要照顧者，請用認領' };
+    if (p.by === saint) return { ok: false, wrote: false, error: '你已是主要照顧者' };
+    var rows = readCoCareRows_(ss);
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].id === p.stableId && rows[i].saint === saint && rows[i].status === '共同') {
+        return { ok: true, wrote: false, already: true, data: careData_(ss, saint) };
+      }
+    }
+    var sh = ss.getSheetByName(CONFIG.COCARE_TAB);
+    if (!sh) { sh = ss.insertSheet(CONFIG.COCARE_TAB); sh.appendRow(['穩定ID', '共同照顧者', '加入時間', '狀態', '退出時間']); }
+    sh.appendRow([p.stableId, saint, new Date(), '共同', '']);
+    return { ok: true, wrote: true, already: false, data: careData_(ss, saint) };
+  } finally { lock.releaseLock(); }
+}
+function leaveCare_(ss, saint, key, name) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var p = resolvePerson_(ss, key);
+    if (p.name !== name) return { ok: false, wrote: false, error: '資料已變動，請重新整理' };
+    if (p.by === saint) return { ok: false, wrote: false, error: '主要照顧者不能用退出共同照顧來解除認領' };
+    var sh = ss.getSheetByName(CONFIG.COCARE_TAB);
+    var rows = readCoCareRows_(ss);
+    var hit = null;
+    rows.forEach(function (r) { if (r.id === p.stableId && r.saint === saint && r.status === '共同') hit = r; });
+    if (!hit || !sh) return { ok: false, wrote: false, error: '你不是這位的共同照顧者' };
+    sh.getRange(hit.row, 4).setValue('已退出');
+    sh.getRange(hit.row, 5).setValue(new Date());
+    return { ok: true, wrote: true, data: careData_(ss, saint) };
+  } finally { lock.releaseLock(); }
 }
 
 function visitSheet_(ss) {
@@ -665,8 +752,12 @@ function visitStatus_(p, recs, today, ids) {
   return { last: last ? last.date : '', lastStatus: last ? last.status : '', due: due, never: !last, overdue: dayNum_(today) - dayNum_(due), cycle: cycle, pending: false, remind: true, history: history };
 }
 function claimedBy_(ss, saint) {
-  var out = [];
-  listPeople_(ss).forEach(function (p) { if (!saint || p.by === saint) out.push(p); });
+  var out = [], extra = {};
+  if (saint) readCoCareRows_(ss).forEach(function (r) { if (r.status === '共同' && r.saint === saint) extra[r.id] = 1; });
+  listPeople_(ss).forEach(function (p) {
+    var id = p.stableId || p.key;
+    if (!saint || p.by === saint || extra[id]) out.push(p);
+  });
   return out;
 }
 function myVisits_(ss, saint) {
@@ -675,6 +766,7 @@ function myVisits_(ss, saint) {
   return claimedBy_(ss, saint).map(function (p) {
     var s = visitStatus_(p, recs, today, aliasKeys_(ss, p));
     for (var k in s) p[k] = s[k];
+    p.care = p.by === saint ? 'primary' : 'co';
     return p;
   }).sort(function (a, b) { return b.overdue - a.overdue || (a.name < b.name ? -1 : 1); });
 }
@@ -697,7 +789,7 @@ function record_(ss, saint, req) {
   try {
     p = resolvePerson_(ss, req.key);
     if (p.name !== req.name) return { ok: false, error: '資料已變動，請重新整理' };
-    if (p.by !== saint) return { ok: false, error: '這位不是您認領的，無法填寫' };
+    if (p.by !== saint && !isActiveCoCare_(ss, p.stableId, saint)) return { ok: false, error: '這位不是您認領的，無法填寫' };
     var row = [new Date(), saint, p.tab, req.name, date, req.method, req.status, note, p.stableId || req.key];
     if (p.legacyKey && p.legacyKey !== (p.stableId || req.key)) row.push(p.legacyKey);
     visitSheet_(ss).appendRow(row);
@@ -1444,19 +1536,37 @@ function buildReminders_(ss, today) {
   return { today: today, until: until, weekStart: ws, per: per, unclaimed: unclaimed, weekTotal: recs.filter(function (r) { return r.date >= ws && r.date <= today; }).length };
 }
 function unclaimedPeople_(ss) { return listPeople_(ss).filter(function (p) { return !p.by; }); }
+function claimedGroupPool_(ss) {
+  var co = {};
+  readCoCareRows_(ss).forEach(function (r) { if (r.status === '共同') co[r.id] = 1; });
+  var seen = {}, out = [];
+  listPeople_(ss).forEach(function (p) {
+    if (!p || p.active === 'N' || p.mergedInto) return;
+    if (p.attendanceStatus === 'pending' || p.tier === '待核實' || p.tab === '待核實') return;
+    var id = p.stableId || p.key;
+    if (!id || seen[id]) return;
+    if (!p.by && !co[id]) return;
+    seen[id] = 1;
+    out.push(p);
+  });
+  return out;
+}
 
 function txt_(t, o) { var x = { type: 'text', text: String(t), wrap: true }; for (var k in (o || {})) x[k] = o[k]; return x; }
-function personRow_(p, kind) {
+function personRow_(p, kind, linkBase) {
   var tag = '推薦';
   if (p.st) tag = kind === 'over' ? '逾期 ' + p.st.overdue + ' 天' : p.st.never ? '尚未回訪' : (p.st.due === p.st.today ? '今天' : md_(p.st.due) + ' 到期');
   var mark = p.tier === '待核實' ? '待' : p.tier;
-  return { type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'sm', contents: [
+  var row = { type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'sm', contents: [
     { type: 'box', layout: 'vertical', width: '26px', height: '20px', cornerRadius: '4px', backgroundColor: TIER_COLOR[p.tier] || '#888888', justifyContent: 'center', contents: [txt_(mark, { size: 'xs', color: '#FFFFFF', align: 'center', weight: 'bold' })] },
     txt_(p.name, { size: 'md', weight: 'bold', flex: 4, color: '#222222' }),
     txt_(tag, { size: 'sm', flex: 4, align: 'end', color: kind === 'over' ? '#C62828' : '#8A5A00' })
   ] };
+  var id = p.stableId || p.key;
+  if (linkBase && id) row.action = { type: 'uri', label: '填寫回訪', uri: String(linkBase).split('?')[0] + '?k=' + encodeURIComponent(id) };
+  return row;
 }
-function sampleSections_(people) {
+function sampleSections_(people, linkBase) {
   var over = [], due = [], plain = [];
   people.forEach(function (p) {
     if (p.st && p.st.overdue > 0) over.push(p);
@@ -1466,7 +1576,7 @@ function sampleSections_(people) {
   var body = [];
   function block(title, color, bg, list, kind) {
     if (!list.length) return;
-    var rows = list.map(function (p) { return personRow_(p, kind); });
+    var rows = list.map(function (p) { return personRow_(p, kind, linkBase); });
     body.push({ type: 'box', layout: 'vertical', backgroundColor: bg, cornerRadius: '10px', paddingAll: '12px', margin: 'md', contents: [txt_(title, { weight: 'bold', color: color, size: 'md' })].concat(rows) });
   }
   block('已逾期', '#C62828', '#FDECEA', over, 'over');
@@ -1480,10 +1590,7 @@ function countLine_(list) {
   return '這次 A ' + a + '、B ' + b + '、C/D ' + cd + '（池不足不跨級補齊）';
 }
 function sampleBubble_(title, whoLine, people, buttonLabel, uri) {
-  var body = sampleSections_(people);
-  body.push(txt_(countLine_(people), { size: 'xs', color: '#666666', margin: 'md' }));
-  body.push(txt_(SAMPLE_SPEC.assumption, { size: 'xs', color: '#888888', margin: 'sm', wrap: true }));
-  body.push(txt_('這不是完整名單。完整名單請打開小頁面。', { size: 'xs', color: '#888888', margin: 'sm' }));
+  var body = sampleSections_(people, uri);
   return { type: 'bubble', size: 'mega',
     header: { type: 'box', layout: 'vertical', backgroundColor: '#1F6F5C', paddingAll: '16px', contents: [
       txt_(title, { color: '#FFFFFF', weight: 'bold', size: 'xl' }),
@@ -1549,7 +1656,7 @@ function sendPersonalSamples_(ss, today) {
     else to = bind[s];
     if (sentToday_(ss, '個人抽樣', who, today)) { skipped.push(s + '（同日已送出）'); return; }
     if (left !== null && sent >= left) { log_(ss, '個人抽樣', who, to, '', '略過', '本月免費則數不足'); return; }
-    var msg = flex_('本人已認領回訪：' + countLine_(sample), sampleBubble_('本人已認領回訪', s + ' 平安！' + md_(today) + '（週' + weekday_(today) + '）', sample, '填寫回訪', cfg_('LIFF_URL') + '?v=1'));
+    var msg = flex_('本人已認領回訪', sampleBubble_('本人已認領回訪', s + ' 平安！' + md_(today) + '（週' + weekday_(today) + '）', sample, '填寫回訪', cfg_('LIFF_URL') + '?v=1'));
     if (push_(ss, '個人抽樣', who, to, [msg])) sent++;
   });
   if (skipped.length) log_(ss, '個人抽樣', '（未推播）', '', '', '略過', skipped.join('、'));
@@ -1562,18 +1669,20 @@ function pushGroupReminder() {
   if (!props.getProperty('JOSEPH_TOKEN')) { log_(ss, '群組抽樣', names.join('、'), '', '', '失敗', '尚未設定指令碼屬性 JOSEPH_TOKEN'); return 0; }
   var pending = names.filter(function (n) { return !sentToday_(ss, '群組抽樣', n, today); });
   if (!pending.length) { log_(ss, '群組抽樣', '（全部）', '', '', '略過', '同日已送出'); return 0; }
+  var eligible = {}, pool = claimedGroupPool_(ss);
+  pool.forEach(function (p) { eligible[p.stableId || p.key] = 1; });
   var keys = savedSampleKeys_(ss, today, SAMPLE_SPEC.groupPool);
-  var sample = keys ? peopleByKeys_(ss, keys) : null;
-  if (!sample) {
-    sample = drawSample_(poolsFrom_(unclaimedPeople_(ss)), SAMPLE_SPEC.counts, Math.random).list;
-    if (!sample.length) { log_(ss, '群組抽樣', '（空池）', '', '', '略過', '沒有可抽的未認領名單'); return 0; }
+  var sample = keys ? peopleByKeys_(ss, keys).filter(function (p) { return eligible[p.stableId || p.key]; }) : null;
+  if (!keys) {
+    sample = drawSample_(poolsFrom_(pool), SAMPLE_SPEC.counts, Math.random).list;
+    if (!sample.length) { log_(ss, '群組抽樣', '（空池）', '', '', '略過', '沒有可抽的已認領名單'); return 0; }
     rememberSample_(ss, today, SAMPLE_SPEC.groupPool, '*', sampleKeys_(sample));
-  }
+  } else if (!sample.length) { log_(ss, '群組抽樣', '（空池）', '', '', '略過', '沒有可抽的已認領名單'); return 0; }
   var G = resolveGroups_(ss);
   G.missing.forEach(function (n) {
     if (pending.indexOf(n) >= 0) log_(ss, '群組抽樣', n, '', '', '失敗', '找不到這個群組的 ID：請確認 Joseph 在群組裡、名稱完全相同、Webhook 已開啟，並在該群組傳一則訊息');
   });
-  var msg = [flex_('未認領推薦：' + countLine_(sample), sampleBubble_('未認領推薦', '弟兄姊妹平安！' + md_(today) + '（週' + weekday_(today) + '）兩群同一份抽樣', sample, '打開小頁面（完整名單）', cfg_('LIFF_URL')))];
+  var msg = [flex_('已認領回訪推薦', sampleBubble_('已認領回訪推薦', '弟兄姊妹平安！' + md_(today) + '（週' + weekday_(today) + '）兩群同一份抽樣', sample, '打開小頁面（完整名單）', cfg_('LIFF_URL')))];
   var left = quotaLeft_(), n = 0;
   pending.forEach(function (name) {
     var gid = G.found[name];
@@ -1590,9 +1699,9 @@ function pushGroupReminder() {
 function previewRemindersToAdmin() {
   var ss = openSs_(), today = today_();
   var personal = planPersonalSamples_(ss, today, Math.random);
-  var group = drawSample_(poolsFrom_(unclaimedPeople_(ss)), SAMPLE_SPEC.counts, Math.random).list;
+  var group = drawSample_(poolsFrom_(claimedGroupPool_(ss)), SAMPLE_SPEC.counts, Math.random).list;
   var msgs = [];
-  if (group.length) msgs.push(flex_('預覽 未認領推薦', sampleBubble_('未認領推薦', '預覽（不寫送出紀錄）', group, '打開小頁面', cfg_('LIFF_URL'))));
+  if (group.length) msgs.push(flex_('預覽 已認領回訪推薦', sampleBubble_('已認領回訪推薦', '預覽（不寫送出紀錄）', group, '打開小頁面', cfg_('LIFF_URL'))));
   saints_().forEach(function (s) {
     var list = personal.samples[s].list;
     if (list.length) msgs.push(flex_('預覽 本人已認領回訪 ' + s, sampleBubble_('本人已認領回訪', s, list, '填寫回訪', cfg_('LIFF_URL') + '?v=1')));
