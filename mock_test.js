@@ -33,7 +33,7 @@ const triggers=[];const GROUPS={Cgood:{name:'一杯好咖啡',count:12},Cother:{
 function tb(fn){const t={fn,spec:{},getHandlerFunction:()=>fn};const b={timeBased:()=>b,onWeekDay:d=>(t.spec.day=d,b),onMonthDay:d=>(t.spec.mday=d,b),atHour:h=>(t.spec.hour=h,b),nearMinute:m=>(t.spec.min=m,b),inTimezone:z=>(t.spec.tz=z,b),create:()=>{triggers.push(t);return t}};return b;}
 const workbooks={TEST_SHEET:ss};
 const ctx={Date:FakeDate,Math,SpreadsheetApp:{openById:id=>{if(!workbooks[id]) throw new Error('refused spreadsheet '+id); return workbooks[id];},flush(){}},
- PropertiesService:{getScriptProperties:()=>({getProperty:k=>props[k]||null,setProperty:(k,v)=>{props[k]=String(v)},deleteProperty:k=>{delete props[k]}})},
+ PropertiesService:{getScriptProperties:()=>({getProperty:k=>props[k]||null,setProperty:(k,v)=>{props[k]=String(v)},deleteProperty:k=>{delete props[k]},getKeys:()=>Object.keys(props)})},
  LockService:{getScriptLock:()=>({waitLock(){},releaseLock(){}})},Logger:{log:s=>ctx._log.push(String(s))},_log:[],
  Utilities:{formatDate:(d,tz,f)=>{assert.strictEqual(f,'yyyy-MM-dd');return fmt(d,tz)},getUuid:()=>require('crypto').randomUUID()},
  ScriptApp:{WeekDay:{SUNDAY:'SUN',MONDAY:'MON',TUESDAY:'TUE',WEDNESDAY:'WED',THURSDAY:'THU',FRIDAY:'FRI',SATURDAY:'SAT'},getProjectTriggers:()=>triggers.slice(),deleteTrigger:t=>{const i=triggers.indexOf(t);if(i>=0)triggers.splice(i,1);},
@@ -184,7 +184,7 @@ assert(triggers.some(t=>t.fn==='keepMe'));
 ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
 const health=JSON.parse(ctx.doGet().s);
-assert.strictEqual(health.apiVersion,'2026-11-release-5');
+assert.strictEqual(health.apiVersion,'2026-11-release-6');
 assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0);
 let ready=ctx.releaseReadiness();
 assert(ready.ok&&ready.reminderTriggers>0);
@@ -593,5 +593,69 @@ withSs(bOnly,()=>{
   const bp=x.people.find(n=>n.name==='穩');
   assert.strictEqual(bp.tier,'B');assert.strictEqual(bp.cycle,30);assert.strictEqual(bp.due,'2026-12-01');ok('B is claimable and uses the monthly cycle');
 });
+
+const savedConfirmProps={SHEET_ID:props.SHEET_ID,SOURCE_24_SHEET_ID:props.SOURCE_24_SHEET_ID,SOURCE_26_SHEET_ID:props.SOURCE_26_SHEET_ID,SOURCE_27_SHEET_ID:props.SOURCE_27_SHEET_ID,MIGRATION_MANIFEST_JSON:props.MIGRATION_MANIFEST_JSON,MIGRATION_CONFIRM:props.MIGRATION_CONFIRM,MIGRATION_FINGERPRINT:props.MIGRATION_FINGERPRINT};
+const tinyManifest=JSON.stringify({manifestVersion:1,id:'fixture',districts:{'2-4':{A:1,B:0,C:0,D:0,total:1},'2-6':{total:0},'2-7':{total:0}},candidates:1,sameNameGroups:0,sameNameRows:0,reviewNameGroups:0,reviewNameRows:0});
+function confirmSources(){
+  workbooks.CONF24=makeSs({'B 穩定':[['姓名','群組','出席','缺席']]});
+  workbooks.CONF26=makeSs({'出席':attGrid([])});
+  workbooks.CONF27=makeSs({'出席':attGrid([])});
+  props.SOURCE_24_SHEET_ID='CONF24'; props.SOURCE_26_SHEET_ID='CONF26'; props.SOURCE_27_SHEET_ID='CONF27';
+  props.MIGRATION_MANIFEST_JSON=tinyManifest;
+}
+confirmSources();
+const trimLive=makeSs({'A 優先':[HH,['甲 ','青職',5,4,'']],'C 近期斷線':[HH],'D 全年未出席':[HH]});
+workbooks.CONF_LIVE=trimLive; props.SHEET_ID='CONF_LIVE';
+let dry=ctx.migrationDryRun();
+assert(dry.ok,JSON.stringify(dry.errors||dry.error));
+props.MIGRATION_FINGERPRINT=dry.fingerprint;
+props.MIGRATION_CONFIRM='不是';
+ctx._log=[];
+let confirmThrew=false;
+try{ctx.migrationConfirm();}catch(e){confirmThrew=true;}
+assert(confirmThrew&&props.MIGRATION_CONFIRM==='不是'&&ctx._log.some(l=>l.includes('confirm-text')&&l.includes('"wrote":false')&&!l.includes('不是')));
+assert(!trimLive.names().some(n=>n.indexOf('備份')===0));ok('wrong confirm text throws, keeps the flag, and writes nothing');
+props.MIGRATION_CONFIRM='確認遷移';
+ctx._log=[];
+ready=ctx.migrationConfirmReadiness();
+assert(ready.wrote===false&&ready.flagConsumed===false&&ready.wouldWrite===false);
+assert(ready.confirmMatches===true&&ready.fingerprintMatches===true&&ready.stage==='legacy-snapshot');
+assert.strictEqual(ready.legacyTrimOnly,1);
+assert(props.MIGRATION_CONFIRM==='確認遷移');
+assert(!JSON.stringify(ready).includes('確認遷移')&&!JSON.stringify(ready).includes('test-token')&&!JSON.stringify(ready).includes('甲'));
+assert(ctx._log.some(l=>l.includes('"legacyTrimOnly":1')&&l.includes('"wrote":false')));ok('readiness reports the snapshot stop without consuming the flag or writing');
+const beforeNames=trimLive.names().slice();
+ctx._log=[];
+const stopped=ctx.migrationConfirm();
+assert(stopped.wrote===false&&stopped.stage==='legacy-snapshot'&&!props.MIGRATION_CONFIRM);
+assert.strictEqual(trimLive.bag['A 優先'].v[1][0],'甲 ');
+assert.deepStrictEqual(trimLive.names(),beforeNames);
+assert(ctx._log.some(l=>l.includes('"stage":"legacy-snapshot"')&&l.includes('"wrote":false')&&!l.includes('甲')&&!l.includes('確認遷移')));ok('exact fingerprint still stops before backup when the raw name differs from the trimmed plan');
+const cleanLive=makeSs({'A 優先':[HH,['甲','青職',5,4,'']],'C 近期斷線':[HH],'D 全年未出席':[HH]});
+workbooks.CONF_LIVE=cleanLive;
+dry=ctx.migrationDryRun();
+assert(dry.ok,JSON.stringify(dry.errors||dry.error));
+props.MIGRATION_FINGERPRINT='c457de74-1006-22';
+props.MIGRATION_CONFIRM='確認遷移';
+ctx._log=[];
+const fpStop=ctx.migrationConfirm();
+assert(fpStop.wrote===false&&fpStop.stage==='fingerprint'&&!props.MIGRATION_CONFIRM&&!cleanLive.names().some(n=>n.indexOf('備份')===0));
+assert(ctx._log.some(l=>l.includes('c457de74-1006-22')&&l.includes(dry.fingerprint)&&l.includes('"wrote":false')));ok('stored fingerprint that differs from the current plan stops with both values logged');
+props.MIGRATION_FINGERPRINT=dry.fingerprint;
+props.MIGRATION_CONFIRM='確認遷移';
+const passed=ctx.migrationConfirm();
+assert(passed.wrote===true&&passed.stage==='wrote'&&cleanLive.names().some(n=>n.indexOf('備份')===0));ok('matching fingerprint and snapshot still writes');
+props.RESTORE_CONFIRM='不是';
+ctx._log=[];
+confirmThrew=false;
+try{ctx.restoreConfirm();}catch(e){confirmThrew=true;}
+assert(confirmThrew&&props.RESTORE_CONFIRM==='不是'&&ctx._log.some(l=>l.includes('"wrote":false')&&l.includes('confirm-text')&&!l.includes('不是')));
+props.RESTORE_CONFIRM='確認回復';
+delete props.RESTORE_BACKUP_ID;
+ctx._log=[];
+confirmThrew=false;
+try{ctx.restoreConfirm();}catch(e){confirmThrew=true;}
+assert(confirmThrew&&!props.RESTORE_CONFIRM&&ctx._log.some(l=>l.includes('backup-id')&&l.includes('"wrote":false')));ok('restore completion is logged as not written when it stops');
+['SHEET_ID','SOURCE_24_SHEET_ID','SOURCE_26_SHEET_ID','SOURCE_27_SHEET_ID','MIGRATION_MANIFEST_JSON','MIGRATION_CONFIRM','MIGRATION_FINGERPRINT'].forEach(k=>{if(savedConfirmProps[k]==null)delete props[k];else props[k]=savedConfirmProps[k];});
 
 console.log('\nALL BACKEND TESTS PASSED');

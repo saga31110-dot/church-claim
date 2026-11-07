@@ -15,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-release-5';
+var API_VERSION = '2026-11-release-6';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -325,11 +325,20 @@ function restoreDryRun() {
 }
 function restoreConfirm() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('RESTORE_CONFIRM') !== '確認回復') throw new Error('請先 dry-run，再把 RESTORE_CONFIRM 設為「確認回復」');
+  if (props.getProperty('RESTORE_CONFIRM') !== '確認回復') {
+    logActionResult_('restoreConfirm', { ok: false, wrote: false, stage: 'confirm-text', error: '確認文字不符，未刪除旗標，未寫入' });
+    throw new Error('請先 dry-run，再把 RESTORE_CONFIRM 設為「確認回復」');
+  }
   props.deleteProperty('RESTORE_CONFIRM');
   var id = props.getProperty('RESTORE_BACKUP_ID');
-  if (!id) throw new Error('請設定 RESTORE_BACKUP_ID');
-  return restoreBackup_(openSs_(), id, { confirm: true, confirmText: '確認回復' });
+  if (!id) {
+    logActionResult_('restoreConfirm', { ok: false, wrote: false, stage: 'backup-id', error: '沒有備份編號，未寫入' });
+    throw new Error('請設定 RESTORE_BACKUP_ID');
+  }
+  var res = restoreBackup_(openSs_(), id, { confirm: true, confirmText: '確認回復' });
+  res.stage = res.wrote ? 'wrote' : 'restore';
+  logActionResult_('restoreConfirm', res);
+  return res;
 }
 function mergeDryRun() {
   var props = PropertiesService.getScriptProperties();
@@ -337,16 +346,25 @@ function mergeDryRun() {
 }
 function mergeConfirm() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('MERGE_CONFIRM') !== '確認合併') throw new Error('請先 dry-run，再把 MERGE_CONFIRM 設為「確認合併」');
+  if (props.getProperty('MERGE_CONFIRM') !== '確認合併') {
+    logActionResult_('mergeConfirm', { ok: false, wrote: false, stage: 'confirm-text', error: '確認文字不符，未刪除旗標，未寫入' });
+    throw new Error('請先 dry-run，再把 MERGE_CONFIRM 設為「確認合併」');
+  }
   props.deleteProperty('MERGE_CONFIRM');
-  return mergePeople_(openSs_(), { keepId: props.getProperty('MERGE_KEEP_ID') || '', mergeId: props.getProperty('MERGE_ID') || '', confirm: true, confirmText: '確認合併' });
+  var res = mergePeople_(openSs_(), { keepId: props.getProperty('MERGE_KEEP_ID') || '', mergeId: props.getProperty('MERGE_ID') || '', confirm: true, confirmText: '確認合併' });
+  res.stage = res.wrote ? 'wrote' : 'merge';
+  logActionResult_('mergeConfirm', res);
+  return res;
 }
 function adminBindingConfirm() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('REPAIR_CONFIRM') !== '確認修復') throw new Error('請先做 dry-run，再把 REPAIR_CONFIRM 設為「確認修復」');
+  if (props.getProperty('REPAIR_CONFIRM') !== '確認修復') {
+    logActionResult_('adminBindingConfirm', { ok: false, wrote: false, stage: 'confirm-text', error: '確認文字不符，未刪除旗標，未寫入' });
+    throw new Error('請先做 dry-run，再把 REPAIR_CONFIRM 設為「確認修復」');
+  }
   props.deleteProperty('REPAIR_CONFIRM');
   var op = props.getProperty('REPAIR_OP') || 'release';
-  return repairBinding_(openSs_(), {
+  var res = repairBinding_(openSs_(), {
     mode: 'confirm', confirm: true, op: op,
     saint: props.getProperty('REPAIR_SAINT') || '',
     expectDisplayName: props.getProperty('REPAIR_DISPLAY_NAME') || '',
@@ -354,6 +372,9 @@ function adminBindingConfirm() {
     toUserId: props.getProperty('REPAIR_TO_USER_ID') || '',
     toDisplayName: props.getProperty('REPAIR_TO_DISPLAY_NAME') || ''
   });
+  res.stage = res.wrote ? 'wrote' : 'repair';
+  logActionResult_('adminBindingConfirm', { ok: res.ok, wrote: res.wrote, stage: res.stage, error: res.ok ? '' : '未寫入' });
+  return res;
 }
 
 function today_() { return Utilities.formatDate(new Date(), CONFIG.TZ, 'yyyy-MM-dd'); }
@@ -1091,6 +1112,44 @@ function safeMigrationReport_(plan, input) {
     liveDeltaNote: plan.liveDelta && plan.liveDelta.note || ''
   };
 }
+function logActionResult_(action, res) {
+  var line = {
+    action: action, ok: !!(res && res.ok), wrote: !!(res && res.wrote),
+    stage: res && res.stage || '', error: res && res.error || '', errors: (res && res.errors) || [],
+    fingerprint: (res && (res.fingerprint || res.currentFingerprint)) || '',
+    expectedFingerprint: res && res.expectedFingerprint || '', backupId: res && res.backupId || ''
+  };
+  ['wouldWrite', 'flagConsumed', 'fingerprintMatches', 'confirmPresent', 'confirmMatches', 'expectedFingerprintLength', 'legacyNameMismatch', 'legacyTrimOnly', 'legacyClaimMismatch', 'legacyMissingRow'].forEach(function (k) {
+    if (res && res[k] != null) line[k] = res[k];
+  });
+  Logger.log(JSON.stringify(line));
+  return res;
+}
+function migrationStage_(res) {
+  var e = (res && res.error) || '';
+  if (res && res.wrote) return 'wrote';
+  if (e.indexOf('原分頁') >= 0) return 'legacy-snapshot';
+  if (e.indexOf('計畫') >= 0) return 'live-coverage';
+  if (e.indexOf('回訪') >= 0) return 'visit-snapshot';
+  return 'stopped';
+}
+function legacySnapshotDetail_(ss, plan) {
+  var nameMismatch = 0, trimOnly = 0, claimMismatch = 0, missingRow = 0, byTab = {};
+  (plan.people || []).forEach(function (p) { if (p.legacyKey) (byTab[p.tab] = byTab[p.tab] || []).push(p); });
+  Object.keys(byTab).forEach(function (tab) {
+    var sh = ss.getSheetByName(tab);
+    var values = sh ? sh.getDataRange().getValues() : [];
+    byTab[tab].forEach(function (p) {
+      if (!sh || p.row < 1 || p.row > values.length) { missingRow++; return; }
+      var r = values[p.row - 1];
+      var raw = r[0] == null ? '' : String(r[0]);
+      var planName = p.name == null ? '' : String(p.name);
+      if (raw !== planName) { nameMismatch++; if (raw.trim() === planName) trimOnly++; }
+      if ((r[4] || '') !== (p.by || '')) claimMismatch++;
+    });
+  });
+  return { nameMismatch: nameMismatch, trimOnly: trimOnly, claimMismatch: claimMismatch, missingRow: missingRow };
+}
 function migrationDryRun() {
   var input = collectMigrationInput_(openSs_());
   if (input.error) { Logger.log(input.error); return { ok: false, wrote: false, error: input.error }; }
@@ -1102,17 +1161,73 @@ function migrationDryRun() {
 }
 function migrationConfirm() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('MIGRATION_CONFIRM') !== '確認遷移') throw new Error('請先 dry-run，再把 MIGRATION_CONFIRM 設為「確認遷移」');
+  if (props.getProperty('MIGRATION_CONFIRM') !== '確認遷移') {
+    logActionResult_('migrationConfirm', { ok: false, wrote: false, stage: 'confirm-text', error: '確認文字不符，未刪除旗標，未寫入' });
+    throw new Error('請先 dry-run，再把 MIGRATION_CONFIRM 設為「確認遷移」');
+  }
   var expect = props.getProperty('MIGRATION_FINGERPRINT');
   props.deleteProperty('MIGRATION_CONFIRM');
-  var ss = openSs_();
+  var ss;
+  try { ss = openSs_(); } catch (e) {
+    logActionResult_('migrationConfirm', { ok: false, wrote: false, stage: 'sheet', error: '無法開啟正式表，未寫入' });
+    throw e;
+  }
   var input = collectMigrationInput_(ss);
-  if (input.error) return { ok: false, wrote: false, error: input.error };
+  if (input.error) return logActionResult_('migrationConfirm', { ok: false, wrote: false, stage: 'input', error: input.error });
   input.manifest = activeManifest_();
   var plan = buildMigrationPlan_(input);
-  if (!plan.ok) return { ok: false, wrote: false, errors: plan.errors, liveDelta: plan.liveDelta };
-  if (!expect || expect !== plan.fingerprint) return { ok: false, wrote: false, error: '與剛剛的 dry-run 指紋不同，未寫入。請重新 dry-run，不要用舊計畫覆蓋現況。', fingerprint: plan.fingerprint };
-  return applyMigration_(ss, plan, { confirm: true, confirmText: '確認遷移' });
+  if (!plan.ok) return logActionResult_('migrationConfirm', { ok: false, wrote: false, stage: 'plan', errors: plan.errors, fingerprint: plan.fingerprint });
+  if (!expect || expect !== plan.fingerprint) return logActionResult_('migrationConfirm', { ok: false, wrote: false, stage: 'fingerprint', error: '與剛剛的 dry-run 指紋不同，未寫入。請重新 dry-run，不要用舊計畫覆蓋現況。', fingerprint: plan.fingerprint, expectedFingerprint: expect || '' });
+  var res = applyMigration_(ss, plan, { confirm: true, confirmText: '確認遷移' });
+  res.stage = migrationStage_(res);
+  return logActionResult_('migrationConfirm', res);
+}
+function migrationConfirmReadiness() {
+  var props = PropertiesService.getScriptProperties();
+  var keys = [];
+  try { keys = props.getKeys(); } catch (e1) { keys = []; }
+  var confirmVal = props.getProperty('MIGRATION_CONFIRM');
+  var expect = props.getProperty('MIGRATION_FINGERPRINT');
+  var report = {
+    ok: false, wrote: false, wouldWrite: false, flagConsumed: false, apiVersion: API_VERSION,
+    confirmPresent: !(confirmVal == null || confirmVal === ''),
+    confirmMatches: confirmVal === '確認遷移',
+    fingerprintPresent: !(expect == null || expect === ''),
+    expectedFingerprint: expect || '',
+    expectedFingerprintLength: expect ? String(expect).length : 0,
+    currentFingerprint: '', fingerprintMatches: false,
+    migrationKeys: keys.filter(function (k) { return k.indexOf('MIGRATION_') === 0; }),
+    stage: '', error: '', errors: [],
+    legacyNameMismatch: 0, legacyTrimOnly: 0, legacyClaimMismatch: 0, legacyMissingRow: 0,
+    note: '只讀。沒有刪除確認旗標，也沒有寫入正式表。旗標現在不存在，不能用來判斷上一次確認停在哪裡，因為通過文字檢查後就會先刪除旗標。'
+  };
+  var ss;
+  try { ss = openSs_(); } catch (e2) { report.stage = 'sheet'; report.error = '無法開啟正式表'; logActionResult_('migrationConfirmReadiness', report); return report; }
+  var input = collectMigrationInput_(ss);
+  if (input.error) { report.stage = 'input'; report.error = input.error; logActionResult_('migrationConfirmReadiness', report); return report; }
+  input.manifest = activeManifest_();
+  var plan = buildMigrationPlan_(input);
+  report.currentFingerprint = plan.fingerprint || '';
+  report.fingerprintMatches = !!expect && expect === plan.fingerprint;
+  if (!plan.ok) { report.stage = 'plan'; report.errors = plan.errors || []; logActionResult_('migrationConfirmReadiness', report); return report; }
+  if (!expect || expect !== plan.fingerprint) { report.stage = 'fingerprint'; report.error = '儲存的指紋與現時計畫不同，確認會在寫入前停止'; logActionResult_('migrationConfirmReadiness', report); return report; }
+  var legacyProblem = validateLegacySnapshot_(ss, plan);
+  var detail = legacySnapshotDetail_(ss, plan);
+  report.legacyNameMismatch = detail.nameMismatch;
+  report.legacyTrimOnly = detail.trimOnly;
+  report.legacyClaimMismatch = detail.claimMismatch;
+  report.legacyMissingRow = detail.missingRow;
+  if (legacyProblem) { report.stage = 'legacy-snapshot'; report.error = legacyProblem; logActionResult_('migrationConfirmReadiness', report); return report; }
+  var coverageProblem = validateLiveCoverage_(ss, plan);
+  if (coverageProblem) { report.stage = 'live-coverage'; report.error = coverageProblem; logActionResult_('migrationConfirmReadiness', report); return report; }
+  var visitProblem = validateVisitSnapshot_(ss, plan);
+  if (visitProblem) { report.stage = 'visit-snapshot'; report.error = visitProblem; logActionResult_('migrationConfirmReadiness', report); return report; }
+  report.stage = 'ready';
+  report.ok = true;
+  report.wouldWrite = true;
+  report.note += '現時門檻都能通過。這仍不是已寫入；不要依此直接重跑確認。';
+  logActionResult_('migrationConfirmReadiness', report);
+  return report;
 }
 function applyMigration_(ss, plan, opts) {
   if (!plan || !plan.ok) return { ok: false, wrote: false, error: '計畫有錯誤，拒絕寫入', errors: plan && plan.errors };
