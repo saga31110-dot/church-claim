@@ -719,12 +719,14 @@ withSs(careSs,()=>{
   const otherName=call({action:'visits',idToken:'tok1'}).people.find(p=>p.key==='2-4|同名|2');
   assert(primary.history.some(h=>h.saint==='聖徒二'&&h.note==='共同紀錄')&&(!otherName||!otherName.history.some(h=>h.note==='共同紀錄')));
   assert(!call({action:'record',idToken:'tok4',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).ok);
+  x=call({action:'joinCare',idToken:'tok4',key:'2-4|同名|1',name:'同名'});
+  assert(x.ok&&ctx.claimedGroupPool_(careSs).length===2&&careSs.bag['共同照顧'].v.filter(r=>r[3]==='共同').length===2);
   call({action:'bindObserver',idToken:'tok9'});
   assert(/觀察者/.test(call({action:'record',idToken:'tok9',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).error));
   assert(call({action:'submit',idToken:'tok2',claims:[{key:'2-4|同名|1',name:'同名'}]}).conflicts.length&&careSs.bag['A 優先'].v[1][4]==='管理者');
   const blocked=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
   assert(/仍有共同照顧者/.test(blocked.conflicts[0].reason)&&careSs.bag['A 優先'].v[1][4]==='管理者');
-  assert(!call({action:'leaveCare',idToken:'tok4',key:'2-4|同名|1',name:'同名'}).ok);
+  assert(!call({action:'leaveCare',idToken:'tok1',key:'2-4|同名|1',name:'同名'}).ok&&careSs.bag['共同照顧'].v.filter(r=>r[3]==='共同').length===2);
   const planned=ctx.planPersonalSamples_(careSs,'2026-11-09',()=>0);
   assert(planned.samples['管理者'].list.some(p=>p.stableId==='2-4|同名|1'));
   assert(!planned.samples['聖徒二'].list.some(p=>(p.stableId||p.key)==='2-4|同名|1'));
@@ -738,7 +740,9 @@ withSs(careSs,()=>{
   assert(careSs.bag['抽樣紀錄'].v.some(r=>r[1]==='未認領推薦'));
   assert(careSs.bag['抽樣紀錄'].v.some(r=>r[1]==='已認領回訪推薦'&&!String(r[3]).includes('2-4|未|1')));
   const left=call({action:'leaveCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
-  assert(left.ok&&careSs.bag['共同照顧'].v[1][3]==='已退出'&&careSs.bag['回訪紀錄'].v.length===2);
+  assert(left.ok&&careSs.bag['回訪紀錄'].v.length===2);
+  assert(!call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]}).released.length);
+  assert(call({action:'leaveCare',idToken:'tok4',key:'2-4|同名|1',name:'同名'}).ok);
   assert(!call({action:'visits',idToken:'tok2'}).people.some(p=>p.key==='2-4|同名|1'));
   assert(!call({action:'record',idToken:'tok2',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).ok);
   const released=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});

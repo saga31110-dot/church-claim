@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>召會認領整合預覽</title>
+<style>
+  body{margin:0;font-family:"PingFang TC","Noto Sans TC",sans-serif;background:#f6f3ee;color:#222}
+  .banner{background:#8a2b2b;color:#fff;padding:12px 16px;font-weight:700}
+  .wrap{max-width:980px;margin:0 auto;padding:16px}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .card{background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 4px #0002;flex:1;min-width:280px}
+  h2{font-size:16px;margin:0 0 8px}
+  button,select,input,textarea{font:inherit}
+  .role{margin:8px 0 16px}
+  .bubble{border:1px solid #ddd;border-radius:16px;overflow:hidden}
+  .bh{background:#1F6F5C;color:#fff;padding:14px}
+  .bh small{color:#D7F2EA}
+  .bb{padding:12px}
+  .sec{background:#E7F6F1;border-radius:10px;padding:10px}
+  .person{display:flex;gap:8px;align-items:center;margin-top:8px;background:#fff;border-radius:8px;padding:8px;cursor:pointer;border:0;width:100%;text-align:left}
+  .tag{width:26px;height:20px;border-radius:4px;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px}
+  .A{background:#E0533D}.B{background:#2B6CB0}.D{background:#6B7A8F}
+  .sheet{border:1px solid #ddd;border-radius:12px;padding:12px;margin-top:12px}
+  .warn{background:#fff4dc;padding:8px;border-radius:8px}
+  .ok{background:#e7f6f1;padding:8px;border-radius:8px}
+  label{display:block;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="banner">預覽、不寫正式資料、不發訊。這不是 LINE，也不會登入或送出。</div>
+<div class="wrap">
+  <div class="role">以誰查看：
+    <select id="role">
+      <option value="jia">示範服事者甲</option>
+      <option value="yi">示範服事者乙</option>
+      <option value="none">無關的人</option>
+      <option value="observer">觀察者</option>
+    </select>
+    <button id="reset" type="button">重新開始</button>
+  </div>
+  <div class="row">
+    <section class="card">
+      <h2>群組卡（兩群同一份，全體已認領）</h2>
+      <div class="bubble"><div class="bh"><b>已認領回訪推薦</b><br><small>弟兄姊妹平安！11/7（週六）兩群同一份抽樣</small></div>
+        <div class="bb"><div class="sec" id="groupRows"></div></div></div>
+    </section>
+    <section class="card">
+      <h2>個人卡（只寄給主要，且只含到期的人）</h2>
+      <div class="bubble"><div class="bh"><b>本人已認領回訪</b><br><small id="personalSub"></small></div>
+        <div class="bb"><div class="sec" id="personalRows"></div></div></div>
+    </section>
+  </div>
+  <section class="card" style="margin-top:16px">
+    <h2>名單上的共同照顧與回訪</h2>
+    <div id="roster"></div>
+    <div id="result"></div>
+  </section>
+</div>
+<script>
+function seed() {
+  return [
+    { id: '2-4|示範A01|1', name: '示範對象A01', tier: 'A', group: '示範群組一', primary: 'jia', cos: [], history: [] },
+    { id: '2-4|示範同名|1', name: '示範對象同名', tier: 'A', group: '示範群組一', primary: 'jia', cos: [], history: [] },
+    { id: '2-4|示範同名|2', name: '示範對象同名', tier: 'A', group: '示範群組二', primary: 'yi', cos: [], history: [] },
+    { id: '2-4|示範B01|1', name: '示範對象B01', tier: 'B', group: '示範群組一', primary: 'jia', cos: [], history: [{ who: '示範服事者甲', date: '2026-10-01', method: '見面', note: '既有示範紀錄' }] },
+    { id: '2-4|示範D01|1', name: '示範對象D01', tier: 'D', group: '示範群組三', primary: 'yi', cos: [], history: [] }
+  ];
+}
+var NAMES = { jia: '示範服事者甲', yi: '示範服事者乙', none: '無關的人', observer: '觀察者' };
+var people = seed();
+var role = 'jia';
+function cloneSeed() { return JSON.parse(JSON.stringify(seed())); }
+function findPerson(id) {
+  for (var i = 0; i < people.length; i++) if (people[i].id === id) return people[i];
+  return null;
+}
+function relation(p, who) {
+  if (!p || who === 'observer' || who === 'none') return '';
+  if (p.primary === who) return 'primary';
+  if (p.cos.indexOf(who) >= 0) return 'co';
+  return '';
+}
+function rowButton(p) {
+  return '<button type="button" class="person" data-id="' + p.id + '"><span class="tag ' + p.tier + '">' + p.tier + '</span><b>' + p.name + '</b><span style="margin-left:auto">推薦</span></button>';
+}
+function claimed() { return people.filter(function (p) { return p.primary; }); }
+function show(html) { document.getElementById('result').innerHTML = html; }
+function draw() {
+  document.getElementById('groupRows').innerHTML = claimed().map(rowButton).join('');
+  var mine = people.filter(function (p) { return p.primary === role; });
+  document.getElementById('personalSub').textContent = NAMES[role] + ' 平安！私人提醒只含主要照顧的人';
+  document.getElementById('personalRows').innerHTML = mine.length ? mine.map(rowButton).join('') : '<p>這位沒有要寄出的個人提醒。</p>';
+  document.getElementById('roster').innerHTML = people.map(function (p) {
+    var rel = relation(p, role);
+    var label = rel === 'primary' ? '主要照顧者：' + NAMES[role] : rel === 'co' ? '共同照顧者：' + NAMES[role] + '；主要：' + NAMES[p.primary] : (p.primary ? '主要：' + NAMES[p.primary] : '尚未認領');
+    var btn = '';
+    if (role === 'jia' || role === 'yi') {
+      if (!rel && p.primary) btn += ' <button type="button" data-join="' + p.id + '">加入共同照顧</button>';
+      if (rel === 'co') btn += ' <button type="button" data-leave="' + p.id + '">退出共同照顧</button>';
+      if (rel === 'primary') btn += ' <button type="button" data-cancel="' + p.id + '">取消主要認領</button>';
+    }
+    return '<p data-person="' + p.id + '">' + p.name + '　' + label + (p.cos.length ? '（共同 ' + p.cos.map(function (c) { return NAMES[c]; }).join('、') + '）' : '') + btn + '</p>';
+  }).join('');
+  document.querySelectorAll('.person').forEach(function (b) { b.onclick = function () { openVisit(b.getAttribute('data-id')); }; });
+  document.querySelectorAll('[data-join]').forEach(function (b) { b.onclick = function () { joinCare(b.getAttribute('data-join')); }; });
+  document.querySelectorAll('[data-leave]').forEach(function (b) { b.onclick = function () { leaveCare(b.getAttribute('data-leave')); }; });
+  document.querySelectorAll('[data-cancel]').forEach(function (b) { b.onclick = function () { cancelPrimary(b.getAttribute('data-cancel')); }; });
+}
+function joinCare(id) {
+  var p = findPerson(id);
+  if (role !== 'jia' && role !== 'yi') { show('<div class="warn">不能加入。</div>'); return; }
+  if (!p || !p.primary) { show('<div class="warn">這位還沒有主要照顧者，請用認領。</div>'); return; }
+  if (p.primary === role) { show('<div class="warn">你已是主要照顧者。</div>'); return; }
+  if (p.cos.indexOf(role) >= 0) { show('<div class="ok">你已經是共同照顧者。</div>'); return; }
+  p.cos.push(role);
+  draw();
+  show('<div class="ok">已加入「' + p.name + '」的共同照顧。只存在這個預覽頁的記憶體。</div>');
+}
+function leaveCare(id) {
+  var p = findPerson(id);
+  if (!p || p.cos.indexOf(role) < 0) { show('<div class="warn">你不是這位的共同照顧者。</div>'); return; }
+  p.cos = p.cos.filter(function (c) { return c !== role; });
+  draw();
+  show('<div class="warn">已退出自己的共同照顧。主要認領與回訪紀錄都留著。再點這位不會看到紀錄。</div>');
+}
+function cancelPrimary(id) {
+  var p = findPerson(id);
+  if (!p || p.primary !== role) { show('<div class="warn">只有主要照顧者可以取消自己的認領。</div>'); return; }
+  if (p.cos.length) {
+    show('<div class="warn">仍有共同照顧者，主要不能退出。系統不會自動改主要，也不會解除其他人。</div>');
+    return;
+  }
+  p.primary = '';
+  draw();
+  show('<div class="ok">已取消主要認領。回訪紀錄仍留在這位示範對象上。</div>');
+}
+function openVisit(id) {
+  var p = findPerson(id);
+  if (role === 'observer') { show('<div class="warn">觀察者模式不能填寫回訪，也不顯示回訪紀錄。</div>'); return; }
+  if (!p || !relation(p, role)) { show('<div class="warn">你目前沒有這位的照顧關係，無法填寫回訪，也不顯示回訪紀錄。</div>'); return; }
+  var hist = p.history.map(function (h) { return '<li>' + h.date + '　' + h.who + '　' + h.method + '　' + h.note + '</li>'; }).join('') || '<li>還沒有紀錄</li>';
+  show('<div class="sheet" data-open="' + p.id + '"><b>' + p.name + '</b><p>' + p.group + '</p><label>回訪日期<input id="fd" type="date" value="2026-11-07"></label><label>方式<select id="fm"><option>見面</option><option>電話</option><option>LINE</option><option>其他</option></select></label><label>備註<textarea id="fn"></textarea></label><button id="save" type="button">儲存回訪</button><p>最近紀錄</p><ul id="hist">' + hist + '</ul><p>只存在這個預覽頁的記憶體，不會寫入。</p></div>');
+  document.getElementById('save').onclick = function () { saveVisit(p.id); };
+}
+function saveVisit(id) {
+  var p = findPerson(id);
+  if (!p || !relation(p, role)) { show('<div class="warn">你目前沒有這位的照顧關係，無法填寫回訪，也不顯示回訪紀錄。</div>'); return; }
+  var date = document.getElementById('fd').value;
+  var method = document.getElementById('fm').value;
+  var note = document.getElementById('fn').value.trim();
+  if (!date || !method) { show('<div class="warn">請填日期和方式。</div>'); return; }
+  p.history.push({ who: NAMES[role], date: date, method: method, note: note || '（無備註）' });
+  openVisit(id);
+}
+function resetAll() { people = cloneSeed(); role = 'jia'; document.getElementById('role').value = 'jia'; draw(); show(''); }
+document.getElementById('role').onchange = function () { role = this.value; draw(); show(''); };
+document.getElementById('reset').onclick = resetAll;
+draw();
+</script>
+</body>
+</html>
