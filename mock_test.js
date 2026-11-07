@@ -87,8 +87,11 @@ assert.strictEqual(ctx.WEEK_HEADERS.length,43);
 assert.strictEqual(ctx.WEEK_HEADERS[0],'2025-12-29');
 assert.strictEqual(ctx.WEEK_HEADERS[42],'2026-10-19');
 for(let i=1;i<43;i++) assert.strictEqual(ctx.dayNum_(ctx.WEEK_HEADERS[i])-ctx.dayNum_(ctx.WEEK_HEADERS[i-1]),7);
-assert.strictEqual(ctx.mismatchesAgainstExpected_({'2-4':{A:35,B:16,C:37,D:599,total:687},'2-6':248,'2-7':71,candidates:1006,sameNameGroups:14,claims:139,visits:22,pendingAsD:false,pendingNotPending:false}).length,0);
-assert(ctx.mismatchesAgainstExpected_({'2-4':{A:35,B:16,C:37,D:599,total:687},'2-6':248,'2-7':71,candidates:1006,sameNameGroups:14,claims:139,visits:22,pendingAsD:true,pendingNotPending:false}).some(s=>/D/.test(s)));
+const structureOk={'2-4':{A:35,B:16,C:37,D:599,total:687},'2-6':248,'2-7':71,candidates:1006,sameNameGroups:14,claims:139,visits:22,pendingAsD:false,pendingNotPending:false};
+assert.strictEqual(ctx.mismatchesAgainstExpected_(structureOk).length,0);
+assert.strictEqual(ctx.structureMismatches_(Object.assign({},structureOk,{claims:200,visits:40}),ctx.ROSTER_MANIFEST_V1).length,0);
+assert(ctx.liveDelta_(Object.assign({},structureOk,{claims:200,visits:40}),ctx.ROSTER_MANIFEST_V1).note.includes('比參考多'));
+assert(ctx.mismatchesAgainstExpected_(Object.assign({},structureOk,{pendingAsD:true})).some(s=>/D/.test(s)));
 assert.strictEqual(ctx.classifyVerified_(5,0),'B');
 assert.strictEqual(ctx.classifyVerified_(5,1),'B');
 assert.strictEqual(ctx.classifyVerified_(5,2),'A');
@@ -97,7 +100,7 @@ assert.strictEqual(ctx.classifyVerified_(1,13),'C');
 assert.strictEqual(ctx.classifyVerified_(0,43),'D');
 assert.strictEqual(ctx.classifyVerified_(0,0),'D');
 assert.strictEqual(ctx.CONFIG.CYCLE['B 穩定'],30);
-ok('公開 LIFF／channel、一四六 09:00、月報 08:00、43 週、分級與 1006／139／22 期望值');
+ok('公開 LIFF／channel、一四六 09:00、月報 08:00、43 週；名單結構有門檻，認領／回訪沒有');
 
 let r=call({action:'init',idToken:'bad'});assert(!r.ok);ok('bad token rejected: '+r.error);
 r=call({action:'init',idToken:'tok3'});assert(!r.ok);ok('wrong aud rejected: '+r.error);
@@ -161,6 +164,21 @@ props.GROUP_PUSH_DAYS='一三五';props.PERSONAL_DAYS='一三五';ctx.setupTrigg
 assert(triggers.filter(t=>t.fn==='sendReminders').every(t=>['MON','THU','SAT'].includes(t.spec.day)&&t.spec.hour===9));
 delete props.GROUP_PUSH_DAYS;delete props.PERSONAL_DAYS;
 ok('setupTriggers：只留週一四六 09:00＋每月 1 日 08:00，清掉舊觸發，保留其他函式');
+const paused=ctx.pauseReminderTriggers();
+assert.strictEqual(paused.created,0);
+assert.strictEqual(triggers.filter(t=>t.fn==='sendReminders'||t.fn==='sendMonthlySummary').length,0);
+assert(triggers.some(t=>t.fn==='keepMe'));
+ctx.setupTriggers();
+assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
+const health=JSON.parse(ctx.doGet().s);
+assert.strictEqual(health.apiVersion,'2026-11-release-2');
+assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0);
+let ready=ctx.releaseReadiness();
+assert(ready.ok&&ready.reminderTriggers>0);
+const savedSheet=props.SHEET_ID;delete props.SHEET_ID;
+ready=ctx.releaseReadiness();
+assert(!ready.ok&&String(ready.missingProperties).includes('SHEET_ID'));
+props.SHEET_ID=savedSheet;ok('doGet apiVersion and readiness check do not read a roster');
 assert.strictEqual(ctx.nextRunDay_('2026-11-09'),'2026-11-12');
 assert.strictEqual(ctx.nextRunDay_('2026-11-12'),'2026-11-14');
 assert.strictEqual(ctx.nextRunDay_('2026-11-14'),'2026-11-16');
@@ -380,7 +398,20 @@ assert(amb.visitMap.find(v=>v.oldKey==='A 優先|2').stableId!==amb.visitMap.fin
 const mismatch=ctx.buildMigrationPlan_({legacy:ambLegacy,source24:[{sourceRow:4,name:'同',group:'G',att:5,absent:4}],source26:[],source27:[],visits:[]});
 assert(!mismatch.ok);ok('unbalanced signature refuses the plan');
 const tiny=ctx.buildMigrationPlan_(input);tiny.enforce=true;const enforced=ctx.buildMigrationPlan_(Object.assign({},input,{enforceExpected:true}));
-assert(!enforced.ok&&enforced.errors.some(e=>/1006|139|22|248|14/.test(e)));ok('production count gate fails closed on a fixture that is not the real roster');
+assert(!enforced.ok&&enforced.errors.some(e=>/1006|248|14/.test(e))&&!enforced.errors.some(e=>/139|22/.test(e)));ok('structure manifest stops a mismatched roster and does not gate claim or visit counts');
+const keptB=ctx.buildMigrationPlan_({legacy:{'A 優先':[],'C 近期斷線':[],'D 全年未出席':[]},source24:[{sourceRow:4,name:'穩',group:'g',att:10,absent:0}],source26:[],source27:[],visits:[],existingIndex:[{stableId:'2-4|穩|1',sourceKey:'2-4|原始出席|4',legacyKey:'',norm:'穩',seq:1,district:'2-4',by:'示範服事者甲'}]});
+assert(keptB.ok,keptB.errors.join(';'));
+assert.strictEqual(keptB.people.find(p=>p.tier==='B').by,'示範服事者甲');ok('re-import keeps a B claim instead of blanking it');
+props.MIGRATION_MANIFEST_JSON=JSON.stringify({manifestVersion:1,id:'bad',districts:{},gates:['claims']});
+assert(ctx.activeManifest_().invalid);delete props.MIGRATION_MANIFEST_JSON;ok('a manifest that gates claim counts is rejected');
+const stale=makeSs({'A 優先':[HH,['甲','g',5,4,'管理者']],'C 近期斷線':[HH],'D 全年未出席':[HH]});
+const stalePlan=ctx.buildMigrationPlan_({legacy:ctx.readLegacyRows_(stale),source24:[{sourceRow:4,name:'甲',group:'g',att:5,absent:4}],source26:[],source27:[],visits:[]});
+assert(stalePlan.ok,stalePlan.errors.join(';'));
+stale.bag['A 優先'].v.push(['乙','g',5,4,'聖徒二']);
+const blocked=ctx.applyMigration_(stale,stalePlan,{confirm:true,confirmText:'確認遷移'});
+assert(!blocked.ok&&blocked.wrote===false);
+assert.strictEqual(stale.bag['A 優先'].v[2][4],'聖徒二');
+assert(!stale.bag['名單索引']);ok('a newer claim outside the plan stops migration and is not overwritten');
 
 const mig=makeSs({
   'A 優先':[HH,['甲','青職',5,4,'管理者']],

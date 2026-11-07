@@ -86,6 +86,7 @@ async function main(){
     if(!liff.isLoggedIn()){ liff.login(); return; }
     checkFriend();
     const j = await api({action:'init'});
+    if(!j.apiVersion) return msg('後端還沒換成這個版本（回應沒有 apiVersion）。請先完成 Apps Script 部署，用瀏覽器打開同一個 /exec 看到 apiVersion 後，再使用這份畫面。現在不要把這份前端換成正式入口。');
     if(!j.bound) return renderBind(j.saints, j.displayName);
     applySession(j);
     if(!S.readOnly && new URLSearchParams(location.search).get('v')==='1') S.mode='visit';

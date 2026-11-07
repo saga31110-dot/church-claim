@@ -10,7 +10,11 @@
  * 比例 A 2、B 2、C 或 D 合計 4。池不足只抽實際人數，不重複、不跨級補齊。待核實不進 C/D。
  *
  * 遷移與綁定修復都是 dry-run 預設，確認前不寫入。不要在這裡執行正式表。
+ * 認領與回訪以執行當下的正式表為準。2026-11-07 的 139／22 只是參考，不是上限。
+ * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
+ * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
+var API_VERSION = '2026-11-release-2';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -42,16 +46,19 @@ var CONFIG = {
   SCHEDULE_NOTE: 'Apps Script 時間觸發 atHour(9).nearMinute(0) 只會在該小時內接近 09 分執行，不保證準時 09:00。'
 };
 var WEEK_HEADERS = ('2025-12-29,2026-01-05,2026-01-12,2026-01-19,2026-01-26,2026-02-02,2026-02-09,2026-02-16,2026-02-23,2026-03-02,2026-03-09,2026-03-16,2026-03-23,2026-03-30,2026-04-06,2026-04-13,2026-04-20,2026-04-27,2026-05-04,2026-05-11,2026-05-18,2026-05-25,2026-06-01,2026-06-08,2026-06-15,2026-06-22,2026-06-29,2026-07-06,2026-07-13,2026-07-20,2026-07-27,2026-08-03,2026-08-10,2026-08-17,2026-08-24,2026-08-31,2026-09-07,2026-09-14,2026-09-21,2026-09-28,2026-10-05,2026-10-12,2026-10-19').split(',');
-var EXPECTED_IMPORT = {
+var ROSTER_MANIFEST_V1 = {
+  manifestVersion: 1,
+  id: '2026-11-07-roster-structure',
+  asOf: '2026-11-07',
+  note: '只核對名單結構。認領與回訪不在門檻內，以執行當下的正式表為準，不得用這份參考覆蓋後來新增的資料。',
   districts: { '2-4': { A: 35, B: 16, C: 37, D: 599, total: 687 }, '2-6': { total: 248 }, '2-7': { total: 71 } },
   candidates: 1006,
   sameNameGroups: 14,
-  claims: 139,
-  visits: 22,
-  weeks: 43,
-  weekStart: '2025-12-29',
-  weekEnd: '2026-10-19'
+  referenceClaims: 139,
+  referenceVisits: 22,
+  gates: ['districts', 'candidates', 'sameNameGroups', 'pendingNotD']
 };
+var EXPECTED_IMPORT = ROSTER_MANIFEST_V1;
 var SAMPLE_SPEC = {
   assumption: '暫定假設（待教授調整）：群組推播抽「未認領推薦」，個人推播抽「本人已認領回訪」，兩種分開抽。比例 A 2 位、B 2 位、C 或 D 合計 4 位。池不足只顯示實際人數，不重複、不跨級補齊；出席待核實不納入 C/D。',
   groupPool: '未認領推薦',
@@ -99,8 +106,10 @@ function adminUserId_() {
 }
 
 function doGet() {
-  return ContentService.createTextOutput(JSON.stringify({ ok: true, service: '回訪認領 API' }))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify({
+    ok: true, service: '回訪認領 API', apiVersion: API_VERSION,
+    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1']
+  })).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
   var out, req;
@@ -158,7 +167,7 @@ function handle_(req, user) {
 }
 function initPayload_(ss, acc, user) {
   var base = {
-    ok: true, saints: saints_(), displayName: user.displayName,
+    ok: true, apiVersion: API_VERSION, saints: saints_(), displayName: user.displayName,
     sampleAssumption: SAMPLE_SPEC.assumption, scheduleNote: CONFIG.SCHEDULE_NOTE,
     cycles: { A: 7, B: 30, C: 14, D: 30 }
   };
@@ -711,20 +720,41 @@ function parseAttendanceGrid_(grid, district) {
 function sigOf_(tier, name, group, att, absent) {
   return [tier, String(name), String(group), String(att), String(absent)].join('||');
 }
-function mismatchesAgainstExpected_(counts) {
-  var e = EXPECTED_IMPORT, bad = [];
-  if (!counts) return ['沒有統計'];
-  var d = counts['2-4'] || {};
-  if (d.A !== e.districts['2-4'].A || d.B !== e.districts['2-4'].B || d.C !== e.districts['2-4'].C || d.D !== e.districts['2-4'].D || d.total !== e.districts['2-4'].total) bad.push('2-4 應為 A35/B16/C37/D599 共 687');
-  if (counts['2-6'] !== e.districts['2-6'].total) bad.push('2-6 應為 248');
-  if (counts['2-7'] !== e.districts['2-7'].total) bad.push('2-7 應為 71');
-  if (counts.candidates !== e.candidates) bad.push('候選應為 1006');
-  if (counts.sameNameGroups !== e.sameNameGroups) bad.push('同名組應為 14（保持分開，不自動合併）');
-  if (counts.claims !== e.claims) bad.push('既有認領應為 139');
-  if (counts.visits !== e.visits) bad.push('既有回訪應為 22');
+function activeManifest_() {
+  var raw = PropertiesService.getScriptProperties().getProperty('MIGRATION_MANIFEST_JSON');
+  if (!raw) return ROSTER_MANIFEST_V1;
+  try {
+    var m = JSON.parse(raw);
+    if (!m || !(m.manifestVersion >= 1) || !m.districts || !m.id) return { invalid: true, error: 'MIGRATION_MANIFEST_JSON 格式不對，已停止' };
+    var gates = m.gates || [];
+    if (gates.indexOf('claims') >= 0 || gates.indexOf('visits') >= 0) return { invalid: true, error: 'manifest 不可把認領或回訪人數當成門檻，已停止' };
+    return m;
+  } catch (e) { return { invalid: true, error: 'MIGRATION_MANIFEST_JSON 無法解析，已停止' }; }
+}
+function structureMismatches_(counts, manifest) {
+  if (!manifest) return [];
+  if (manifest.invalid) return [manifest.error];
+  var bad = [], d = counts['2-4'] || {}, e = manifest.districts || {}, e24 = e['2-4'] || {};
+  if (d.A !== e24.A || d.B !== e24.B || d.C !== e24.C || d.D !== e24.D || d.total !== e24.total) bad.push('名單結構與 manifest ' + manifest.id + ' 的 2-4 不符，已停止且不會寫入');
+  if (counts['2-6'] !== (e['2-6'] || {}).total) bad.push('名單結構與 manifest 的 2-6 不符：現況 ' + counts['2-6'] + '，manifest ' + (e['2-6'] || {}).total + '，已停止');
+  if (counts['2-7'] !== (e['2-7'] || {}).total) bad.push('名單結構與 manifest 的 2-7 不符：現況 ' + counts['2-7'] + '，manifest ' + (e['2-7'] || {}).total + '，已停止');
+  if (manifest.candidates != null && counts.candidates !== manifest.candidates) bad.push('候選人數與 manifest ' + manifest.id + ' 不符：現況 ' + counts.candidates + '，manifest ' + manifest.candidates + '，已停止且不會寫入');
+  if (manifest.sameNameGroups != null && counts.sameNameGroups !== manifest.sameNameGroups) bad.push('同名組數與 manifest 不符：現況 ' + counts.sameNameGroups + '，manifest ' + manifest.sameNameGroups + '，已停止且不會自動合併');
   if (counts.pendingAsD) bad.push('新區不可判為 D');
   if (counts.pendingNotPending) bad.push('新區出席狀態必須是待核實');
   return bad;
+}
+function mismatchesAgainstExpected_(counts) { return structureMismatches_(counts, ROSTER_MANIFEST_V1); }
+function liveDelta_(counts, manifest) {
+  var rc = manifest && manifest.referenceClaims, rv = manifest && manifest.referenceVisits;
+  var note = '認領現況 ' + counts.claims + '、回訪現況 ' + counts.visits + '。';
+  if (!manifest) return { claims: counts.claims, visits: counts.visits, note: note };
+  note += (manifest.asOf || manifest.id) + ' 的參考認領 ' + rc + '、參考回訪 ' + rv + ' 只供對照，不是上限，也不會寫回正式表。';
+  if (rc != null && counts.claims > rc) note += '認領比參考多，多出來的全部保留。';
+  if (rc != null && counts.claims < rc) note += '認領比參考少，請確認是取消而不是遺失；程式不會把參考值寫回去。';
+  if (rv != null && counts.visits > rv) note += '回訪比參考多，全部保留。';
+  if (rv != null && counts.visits < rv) note += '回訪比參考少，請確認沒有漏讀；程式不會刪除或回寫參考筆數。';
+  return { claims: counts.claims, visits: counts.visits, referenceClaims: rc, referenceVisits: rv, note: note };
 }
 function buildMigrationPlan_(input) {
   input = input || {};
@@ -798,10 +828,11 @@ function buildMigrationPlan_(input) {
   });
   src24.filter(function (r) { return r.tier === 'B'; }).sort(function (a, b) { return a.sourceRow - b.sourceRow; }).forEach(function (r) {
     var sk = sourceKey_('2-4', '原始出席', r.sourceRow);
+    var prev = bySource[sk];
     var id = freeze('2-4', r.norm, '', sk);
     people.push({
       stableId: id.id, seq: id.seq, legacyKey: '', sourceKey: sk, district: '2-4', tier: 'B', tab: 'B 穩定', row: 0,
-      name: r.name, norm: r.norm, group: r.group, att: r.att, absent: r.absent, by: '', attendanceStatus: 'verified',
+      name: r.name, norm: r.norm, group: r.group, att: r.att, absent: r.absent, by: prev && prev.by ? prev.by : '', attendanceStatus: 'verified',
       area: r.area, small: r.small, rank: r.rank, sourceTab: '原始出席', sourceRow: r.sourceRow, active: 'Y', mergedInto: ''
     });
   });
@@ -809,11 +840,12 @@ function buildMigrationPlan_(input) {
     (rows || []).slice().sort(function (a, b) { return a.sourceRow - b.sourceRow; }).forEach(function (r) {
       var norm = normalizeName_(r.name);
       var sk = sourceKey_(district, '出席', r.sourceRow);
+      var prev = bySource[sk];
       var id = freeze(district, norm, '', sk);
       if (!r.allZero && r.weeks) warnings.push(district + ' 第 ' + r.sourceRow + ' 列不是全零，仍標為待核實，不自動分級');
       people.push({
         stableId: id.id, seq: id.seq, legacyKey: '', sourceKey: sk, district: district, tier: '待核實', tab: '待核實', row: 0,
-        name: String(r.name).trim(), norm: norm, group: r.group, att: r.att, absent: r.absent, by: '', attendanceStatus: 'pending',
+        name: String(r.name).trim(), norm: norm, group: r.group, att: r.att, absent: r.absent, by: prev && prev.by ? prev.by : '', attendanceStatus: 'pending',
         area: r.area || '', small: r.small || '', rank: r.rank || '', sourceTab: '出席', sourceRow: r.sourceRow, active: 'Y', mergedInto: ''
       });
     });
@@ -857,11 +889,14 @@ function buildMigrationPlan_(input) {
   };
   counts['2-4'].total = counts['2-4'].A + counts['2-4'].B + counts['2-4'].C + counts['2-4'].D;
   counts.candidates = people.length;
-  var expectedErrors = input.enforceExpected ? mismatchesAgainstExpected_(counts) : [];
+  var manifest = input.manifest || (input.enforceExpected || input.enforceStructure ? ROSTER_MANIFEST_V1 : null);
+  var expectedErrors = manifest ? structureMismatches_(counts, manifest) : [];
   var plan = {
     ok: errors.length === 0 && expectedErrors.length === 0,
     errors: errors.concat(expectedErrors), warnings: warnings, people: people, visitMap: visitMap,
-    sameNameGroups: sameNameGroups, counts: counts, wrote: false
+    sameNameGroups: sameNameGroups, counts: counts, wrote: false,
+    manifestId: manifest && manifest.id || '',
+    liveDelta: manifest ? liveDelta_(counts, manifest) : liveDelta_(counts, null)
   };
   plan.fingerprint = planFingerprint_(plan);
   return plan;
@@ -920,9 +955,10 @@ function collectMigrationInput_(ss) {
 function migrationDryRun() {
   var input = collectMigrationInput_(openSs_());
   if (input.error) { Logger.log(input.error); return { ok: false, wrote: false, error: input.error }; }
-  input.enforceExpected = true;
+  input.manifest = activeManifest_();
   var plan = buildMigrationPlan_(input);
-  Logger.log('遷移 dry-run ok=' + plan.ok + ' fingerprint=' + plan.fingerprint + ' candidates=' + plan.counts.candidates + ' claims=' + plan.counts.claims + ' visits=' + plan.counts.visits + ' sameName=' + plan.counts.sameNameGroups + (plan.errors.length ? ' errors=' + plan.errors.length : ''));
+  plan.wrote = false;
+  Logger.log('遷移 dry-run wrote=false api=' + API_VERSION + ' manifest=' + (input.manifest.id || '') + ' ok=' + plan.ok + ' fingerprint=' + plan.fingerprint + ' candidates=' + plan.counts.candidates + ' liveClaims=' + plan.counts.claims + ' liveVisits=' + plan.counts.visits + ' ' + (plan.liveDelta ? plan.liveDelta.note : ''));
   return plan;
 }
 function migrationConfirm() {
@@ -933,10 +969,10 @@ function migrationConfirm() {
   var ss = openSs_();
   var input = collectMigrationInput_(ss);
   if (input.error) return { ok: false, wrote: false, error: input.error };
-  input.enforceExpected = true;
+  input.manifest = activeManifest_();
   var plan = buildMigrationPlan_(input);
-  if (!plan.ok) return { ok: false, wrote: false, errors: plan.errors };
-  if (!expect || expect !== plan.fingerprint) return { ok: false, wrote: false, error: '與 dry-run 指紋不同，未寫入', fingerprint: plan.fingerprint };
+  if (!plan.ok) return { ok: false, wrote: false, errors: plan.errors, liveDelta: plan.liveDelta };
+  if (!expect || expect !== plan.fingerprint) return { ok: false, wrote: false, error: '與剛剛的 dry-run 指紋不同，未寫入。請重新 dry-run，不要用舊計畫覆蓋現況。', fingerprint: plan.fingerprint };
   return applyMigration_(ss, plan, { confirm: true, confirmText: '確認遷移' });
 }
 function applyMigration_(ss, plan, opts) {
@@ -946,6 +982,8 @@ function applyMigration_(ss, plan, opts) {
   }
   var legacyProblem = validateLegacySnapshot_(ss, plan);
   if (legacyProblem) return { ok: false, wrote: false, error: legacyProblem };
+  var coverageProblem = validateLiveCoverage_(ss, plan);
+  if (coverageProblem) return { ok: false, wrote: false, error: coverageProblem };
   var visitProblem = validateVisitSnapshot_(ss, plan);
   if (visitProblem) return { ok: false, wrote: false, error: visitProblem };
   var backup = backupAll_(ss);
@@ -974,6 +1012,35 @@ function validateLegacySnapshot_(ss, plan) {
     else if ((r[4] || '') !== (p.by || '')) bad = '原分頁認領已變，中止';
   });
   return bad;
+}
+function validateLiveCoverage_(ss, plan) {
+  var legacy = readLegacyRows_(ss), known = {};
+  plan.people.forEach(function (p) { if (p.legacyKey) known[p.legacyKey] = p; });
+  var tabs = Object.keys(legacy);
+  for (var t = 0; t < tabs.length; t++) {
+    var rows = legacy[tabs[t]];
+    for (var i = 0; i < rows.length; i++) {
+      var key = tabs[t] + '|' + rows[i].row;
+      var hit = known[key];
+      if (!hit) return '正式表有計畫裡沒有的列 ' + key + '，已停止，不會用舊候選覆蓋';
+      if ((rows[i].by || '') !== (hit.by || '')) return '正式表的認領比計畫新，已停止，不會覆蓋';
+    }
+  }
+  var tierProblem = '';
+  ['B 穩定', '待核實'].forEach(function (tab) {
+    if (tierProblem) return;
+    var sh = ss.getSheetByName(tab);
+    if (!sh || sh.getLastRow() < 2) return;
+    var values = sh.getRange(2, 1, sh.getLastRow() - 1, CONFIG.STABLE_COL).getValues();
+    values.forEach(function (r) {
+      if (tierProblem || !r[0]) return;
+      var hit = null;
+      plan.people.forEach(function (p) { if (r[5] && p.stableId === r[5]) hit = p; });
+      if (!hit) tierProblem = '分頁「' + tab + '」有計畫外的資料，已停止';
+      else if ((r[4] || '') !== (hit.by || '')) tierProblem = '分頁「' + tab + '」的認領與計畫不同，已停止，不會覆蓋';
+    });
+  });
+  return tierProblem;
 }
 function validateVisitSnapshot_(ss, plan) {
   var visits = readVisits_(ss);
@@ -1277,6 +1344,34 @@ function previewRemindersToAdmin() {
   return pushRaw_(adminUserId_(), msgs.slice(0, 5));
 }
 
+function pauseReminderTriggers() {
+  var n = 0, kept = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var f = t.getHandlerFunction();
+    if (f === 'sendReminders' || f === 'sendMonthlySummary') { ScriptApp.deleteTrigger(t); n++; }
+    else kept++;
+  });
+  Logger.log('已暫停 ' + n + ' 個本系統提醒／月報觸發，沒有建立新觸發，也不會發送。遷移與前端確認完成前不要執行 setupTriggers。其他觸發保留 ' + kept + ' 個。');
+  return { paused: n, created: 0, kept: kept };
+}
+function releaseReadiness() {
+  var props = PropertiesService.getScriptProperties();
+  var required = ['SHEET_ID', 'SAINTS', 'ADMIN_SAINT', 'ADMIN_USER_ID', 'JOSEPH_TOKEN'];
+  var missing = required.filter(function (k) { return !props.getProperty(k); });
+  var reminder = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var f = t.getHandlerFunction();
+    if (f === 'sendReminders' || f === 'sendMonthlySummary') reminder++;
+  });
+  var report = {
+    ok: missing.length === 0, apiVersion: API_VERSION, missingProperties: missing,
+    groupPushEnabled: props.getProperty('GROUP_PUSH_ENABLED') === 'true', reminderTriggers: reminder,
+    manifest: ROSTER_MANIFEST_V1.id,
+    note: '此檢查不讀取名單、不發送。遷移完成前 reminderTriggers 應為 0。'
+  };
+  Logger.log(JSON.stringify(report));
+  return report;
+}
 function setupTriggers() {
   var triggers = ScriptApp.getProjectTriggers();
   var others = 0;

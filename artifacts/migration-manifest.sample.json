@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "id": "2026-11-07-roster-structure",
+  "asOf": "2026-11-07",
+  "note": "只核對名單結構。referenceClaims 與 referenceVisits 是 11/7 稍早的參考，不是門檻，不能用來覆蓋後來新增的認領或回訪。gates 裡不可加入 claims 或 visits。",
+  "districts": {
+    "2-4": { "A": 35, "B": 16, "C": 37, "D": 599, "total": 687 },
+    "2-6": { "total": 248 },
+    "2-7": { "total": 71 }
+  },
+  "candidates": 1006,
+  "sameNameGroups": 14,
+  "referenceClaims": 139,
+  "referenceVisits": 22,
+  "gates": ["districts", "candidates", "sameNameGroups", "pendingNotD"]
+}
