@@ -678,4 +678,60 @@ try{ctx.restoreConfirm();}catch(e){confirmThrew=true;}
 assert(confirmThrew&&!props.RESTORE_CONFIRM&&ctx._log.some(l=>l.includes('backup-id')&&l.includes('"wrote":false')));ok('restore completion is logged as not written when it stops');
 ['SHEET_ID','SOURCE_24_SHEET_ID','SOURCE_26_SHEET_ID','SOURCE_27_SHEET_ID','MIGRATION_MANIFEST_JSON','MIGRATION_CONFIRM','MIGRATION_FINGERPRINT'].forEach(k=>{if(savedConfirmProps[k]==null)delete props[k];else props[k]=savedConfirmProps[k];});
 
+const careSs=makeSs({'A 優先':[HH,
+  ['同名','一',5,4,'管理者','2-4|同名|1'],
+  ['同名','二',5,4,'聖徒二','2-4|同名|2'],
+  ['未認','三',5,4,'','2-4|未|1']
+],'B 穩定':[HH],'C 近期斷線':[HH],'D 全年未出席':[HH],'待核實':[HH],
+'名單索引':[['穩定ID','認領者','分頁','分級','姓名','群組','出席狀態','有效','併入'],
+  ['2-4|同名|1','管理者','A 優先','A','同名','一','verified','Y',''],
+  ['2-4|同名|2','聖徒二','A 優先','A','同名','二','verified','Y',''],
+  ['2-4|未|1','','A 優先','A','未認','三','verified','Y','']]});
+withSs(careSs,()=>{
+  call({action:'bind',idToken:'tok1',saint:'管理者'});
+  call({action:'bind',idToken:'tok2',saint:'聖徒二'});
+  call({action:'bind',idToken:'tok4',saint:'聖徒三'});
+  const namesBefore=careSs.names().slice();
+  const init=call({action:'init',idToken:'tok1'});
+  assert(init.ok&&init.data['A 優先'].find(p=>p.stableId==='2-4|同名|1').care==='primary');
+  assert(!careSs.names().includes('共同照顧'));
+  assert.strictEqual(JSON.stringify(careSs.names()),JSON.stringify(namesBefore));
+  assert.strictEqual(careSs.bag['A 優先'].v[1][4],'管理者');
+  let x=call({action:'joinCare',idToken:'tok2',key:'2-4|未|1',name:'未認'});
+  assert(!x.ok&&!careSs.bag['共同照顧']);
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|同名|1',name:'同名',saint:'管理者'});
+  assert(x.ok&&x.wrote&&careSs.bag['共同照顧'].v[1][1]==='聖徒二');
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(x.ok&&x.already&&!x.wrote&&careSs.bag['共同照顧'].v.length===2);
+  assert.strictEqual(careSs.bag['A 優先'].v[1][4],'管理者');
+  assert.strictEqual(careSs.bag['A 優先'].v[2][4],'聖徒二');
+  let vis=call({action:'visits',idToken:'tok2'});
+  assert(vis.people.some(p=>p.key==='2-4|同名|1'&&p.care==='co')&&vis.people.some(p=>p.key==='2-4|同名|2'&&p.care==='primary')&&!vis.people.some(p=>p.key==='2-4|未|1'));
+  setNow('2026-11-09');
+  const recd=call({action:'record',idToken:'tok2',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫',note:'共同紀錄'});
+  assert(recd.ok&&careSs.bag['回訪紀錄'].v[1][1]==='聖徒二'&&careSs.bag['回訪紀錄'].v[1][8]==='2-4|同名|1');
+  const primary=call({action:'visits',idToken:'tok1'}).people.find(p=>p.key==='2-4|同名|1');
+  assert(primary.care==='primary'&&primary.history.some(h=>h.saint==='聖徒二'&&h.note==='共同紀錄'));
+  const stranger=call({action:'record',idToken:'tok4',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'});
+  assert(!stranger.ok);
+  call({action:'bindObserver',idToken:'tok9'});
+  const obs=call({action:'record',idToken:'tok9',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'});
+  assert(!obs.ok&&/觀察者/.test(obs.error));
+  const steal=call({action:'submit',idToken:'tok2',claims:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(steal.conflicts.length&&careSs.bag['A 優先'].v[1][4]==='管理者');
+  const blocked=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(/仍有共同照顧者/.test(blocked.conflicts[0].reason)&&careSs.bag['A 優先'].v[1][4]==='管理者'&&careSs.bag['共同照顧'].v[1][3]==='共同');
+  const kick=call({action:'leaveCare',idToken:'tok4',key:'2-4|同名|1',name:'同名'});
+  assert(!kick.ok&&careSs.bag['共同照顧'].v[1][3]==='共同');
+  const planned=ctx.planPersonalSamples_(careSs,'2026-11-09',()=>0);
+  assert(planned.samples['管理者'].list.some(p=>p.stableId==='2-4|同名|1'));
+  assert(!planned.samples['聖徒二'].list.some(p=>(p.stableId||p.key)==='2-4|同名|1'));
+  const left=call({action:'leaveCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(left.ok&&careSs.bag['共同照顧'].v.length===2&&careSs.bag['共同照顧'].v[1][3]==='已退出'&&careSs.bag['回訪紀錄'].v.length===2);
+  const released=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(released.released.length===1&&careSs.bag['A 優先'].v[1][4]===''&&careSs.bag['回訪紀錄'].v[1][8]==='2-4|同名|1');
+});
+assert(ctx.SAMPLE_SPEC.groupPool==='未認領推薦');
+ok('co-care reads write nothing until join, keeps the primary, and does not add reminder recipients');
+
 console.log('\nALL BACKEND TESTS PASSED');

@@ -33,6 +33,7 @@ var CONFIG = {
   MERGE_TAB: '合併紀錄',
   SAMPLE_TAB: '抽樣紀錄',
   REPAIR_TAB: '修復紀錄',
+  COCARE_TAB: '共同照顧',
   CLAIM_COL: 5,
   STABLE_COL: 6,
   METHODS: ['見面', '電話', 'LINE', '其他'],
@@ -112,7 +113,7 @@ function adminUserId_() {
 function doGet() {
   return ContentService.createTextOutput(JSON.stringify({
     ok: true, service: '回訪認領 API', apiVersion: API_VERSION,
-    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1']
+    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'co-care']
   })).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
@@ -153,6 +154,12 @@ function handle_(req, user) {
     case 'submit':
       assertWriter_(acc);
       return submit_(ss, acc.saint, req.claims || [], req.releases || []);
+    case 'joinCare':
+      assertWriter_(acc);
+      return joinCare_(ss, acc.saint, req.key, req.name);
+    case 'leaveCare':
+      assertWriter_(acc);
+      return leaveCare_(ss, acc.saint, req.key, req.name);
     case 'visits':
       assertWriter_(acc);
       return { ok: true, today: today_(), people: myVisits_(ss, acc.saint) };
@@ -177,9 +184,9 @@ function initPayload_(ss, acc, user) {
   };
   if (!acc) return Object.assign(base, { bound: false, role: null, readOnly: false, saint: null, data: null });
   if (acc.role === 'observer') {
-    return Object.assign(base, { bound: true, role: 'observer', readOnly: true, saint: null, data: readAll_(ss) });
+    return Object.assign(base, { bound: true, role: 'observer', readOnly: true, saint: null, data: withCare_(ss, readAll_(ss), '') });
   }
-  return Object.assign(base, { bound: true, role: 'saint', readOnly: false, saint: acc.saint, data: readAll_(ss) });
+  return Object.assign(base, { bound: true, role: 'saint', readOnly: false, saint: acc.saint, data: withCare_(ss, readAll_(ss), acc.saint) });
 }
 function assertWriter_(acc) {
   if (!acc || acc.role !== 'saint' || !acc.saint) throw new Error('觀察者模式或未綁定不能認領或填寫回訪');
@@ -600,9 +607,15 @@ function submit_(ss, saint, claims, releases) {
       var p = resolvePerson_(ss, c.key);
       if (p.name !== c.name) { conflicts.push({ key: c.key, name: c.name, reason: '資料已變動' }); return; }
       if (p.by === saint) {
+        if (p.stableId && activeCoNames_(ss, p.stableId).length) {
+          conflicts.push({ key: c.key, name: c.name, reason: '仍有共同照顧者，主要不能退出。系統不會自動改主要，也不會解除其他人。' });
+          return;
+        }
         writeClaimCell_(ss, p, '');
         updateIndexClaim_(ss, p.stableId, '');
         released.push(p.stableId || c.key);
+      } else if (p.stableId && isActiveCoCare_(ss, p.stableId, saint)) {
+        conflicts.push({ key: c.key, name: c.name, reason: '共同照顧者不能取消主要認領，只能退出自己的共同照顧。' });
       }
     });
     claims.forEach(function (c) {
@@ -616,7 +629,81 @@ function submit_(ss, saint, claims, releases) {
     });
     SpreadsheetApp.flush();
   } finally { lock.releaseLock(); }
-  return { ok: true, claimed: done, released: released, conflicts: conflicts, data: readAll_(ss) };
+  return { ok: true, claimed: done, released: released, conflicts: conflicts, data: withCare_(ss, readAll_(ss), saint) };
+}
+function readCoCareRows_(ss) {
+  var sh = ss.getSheetByName(CONFIG.COCARE_TAB);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var v = sh.getDataRange().getValues(), out = [];
+  for (var i = 1; i < v.length; i++) {
+    if (!v[i][0] || !v[i][1]) continue;
+    out.push({ row: i + 1, id: String(v[i][0]), saint: String(v[i][1]), status: String(v[i][3] || '') });
+  }
+  return out;
+}
+function activeCoNames_(ss, stableId) {
+  var out = [];
+  readCoCareRows_(ss).forEach(function (r) { if (r.id === stableId && r.status === '共同') out.push(r.saint); });
+  return out;
+}
+function isActiveCoCare_(ss, stableId, saint) {
+  return !!(stableId && saint && activeCoNames_(ss, stableId).indexOf(saint) >= 0);
+}
+function withCare_(ss, data, saint) {
+  var active = {};
+  readCoCareRows_(ss).forEach(function (r) {
+    if (r.status !== '共同') return;
+    (active[r.id] = active[r.id] || []).push(r.saint);
+  });
+  Object.keys(data || {}).forEach(function (tab) {
+    (data[tab] || []).forEach(function (p) {
+      var names = active[p.stableId] || [];
+      p.coCount = names.length;
+      p.coNames = names.slice();
+      p.care = saint && p.by === saint ? 'primary' : (saint && p.stableId && names.indexOf(saint) >= 0 ? 'co' : '');
+    });
+  });
+  return data;
+}
+function careData_(ss, saint) { return withCare_(ss, readAll_(ss), saint); }
+function joinCare_(ss, saint, key, name) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var p = resolvePerson_(ss, key);
+    if (p.name !== name) return { ok: false, wrote: false, error: '資料已變動，請重新整理' };
+    if (!p.stableId) return { ok: false, wrote: false, error: '這筆還沒有穩定ID，不能加入共同照顧' };
+    if (p.active === 'N' || p.mergedInto) return { ok: false, wrote: false, error: '這筆已合併，不能加入' };
+    if (!p.by) return { ok: false, wrote: false, error: '這位還沒有主要照顧者，請用認領' };
+    if (p.by === saint) return { ok: false, wrote: false, error: '你已是主要照顧者' };
+    var rows = readCoCareRows_(ss);
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].id === p.stableId && rows[i].saint === saint && rows[i].status === '共同') {
+        return { ok: true, wrote: false, already: true, data: careData_(ss, saint) };
+      }
+    }
+    var sh = ss.getSheetByName(CONFIG.COCARE_TAB);
+    if (!sh) { sh = ss.insertSheet(CONFIG.COCARE_TAB); sh.appendRow(['穩定ID', '共同照顧者', '加入時間', '狀態', '退出時間']); }
+    sh.appendRow([p.stableId, saint, new Date(), '共同', '']);
+    return { ok: true, wrote: true, already: false, data: careData_(ss, saint) };
+  } finally { lock.releaseLock(); }
+}
+function leaveCare_(ss, saint, key, name) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var p = resolvePerson_(ss, key);
+    if (p.name !== name) return { ok: false, wrote: false, error: '資料已變動，請重新整理' };
+    if (p.by === saint) return { ok: false, wrote: false, error: '主要照顧者不能用退出共同照顧來解除認領' };
+    var sh = ss.getSheetByName(CONFIG.COCARE_TAB);
+    var rows = readCoCareRows_(ss);
+    var hit = null;
+    rows.forEach(function (r) { if (r.id === p.stableId && r.saint === saint && r.status === '共同') hit = r; });
+    if (!hit || !sh) return { ok: false, wrote: false, error: '你不是這位的共同照顧者' };
+    sh.getRange(hit.row, 4).setValue('已退出');
+    sh.getRange(hit.row, 5).setValue(new Date());
+    return { ok: true, wrote: true, data: careData_(ss, saint) };
+  } finally { lock.releaseLock(); }
 }
 
 function visitSheet_(ss) {
@@ -665,8 +752,12 @@ function visitStatus_(p, recs, today, ids) {
   return { last: last ? last.date : '', lastStatus: last ? last.status : '', due: due, never: !last, overdue: dayNum_(today) - dayNum_(due), cycle: cycle, pending: false, remind: true, history: history };
 }
 function claimedBy_(ss, saint) {
-  var out = [];
-  listPeople_(ss).forEach(function (p) { if (!saint || p.by === saint) out.push(p); });
+  var out = [], extra = {};
+  if (saint) readCoCareRows_(ss).forEach(function (r) { if (r.status === '共同' && r.saint === saint) extra[r.id] = 1; });
+  listPeople_(ss).forEach(function (p) {
+    var id = p.stableId || p.key;
+    if (!saint || p.by === saint || extra[id]) out.push(p);
+  });
   return out;
 }
 function myVisits_(ss, saint) {
@@ -675,6 +766,7 @@ function myVisits_(ss, saint) {
   return claimedBy_(ss, saint).map(function (p) {
     var s = visitStatus_(p, recs, today, aliasKeys_(ss, p));
     for (var k in s) p[k] = s[k];
+    p.care = p.by === saint ? 'primary' : 'co';
     return p;
   }).sort(function (a, b) { return b.overdue - a.overdue || (a.name < b.name ? -1 : 1); });
 }
@@ -697,7 +789,7 @@ function record_(ss, saint, req) {
   try {
     p = resolvePerson_(ss, req.key);
     if (p.name !== req.name) return { ok: false, error: '資料已變動，請重新整理' };
-    if (p.by !== saint) return { ok: false, error: '這位不是您認領的，無法填寫' };
+    if (p.by !== saint && !isActiveCoCare_(ss, p.stableId, saint)) return { ok: false, error: '這位不是您認領的，無法填寫' };
     var row = [new Date(), saint, p.tab, req.name, date, req.method, req.status, note, p.stableId || req.key];
     if (p.legacyKey && p.legacyKey !== (p.stableId || req.key)) row.push(p.legacyKey);
     visitSheet_(ss).appendRow(row);
