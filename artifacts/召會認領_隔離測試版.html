@@ -551,7 +551,7 @@ footer{position:fixed;left:0;right:0;bottom:0;padding:12px 12px calc(12px + env(
       + '<p class="m">暫定假設，可再調整：兩種分開抽。比例 A 2、B 2、C 或 D 合計 4。池不足只顯示實際人數，不重複、不跨級補齊。待核實不進 C/D。</p>'
       + '<label class="m"><input id="short" type="checkbox" data-act="short"' + (ui.short ? ' checked' : '') + '> 改用不足的示範池（A 只留 1、B 留 0、C/D 只留 1）</label>'
       + '<div class="row"><button type="button" class="primary" data-act="resample">重新抽樣</button></div></div>';
-    html += '<div class="warn">正式系統的每週推播說明是台北時間週一、四、六 09:00，個人與兩個群組同一時段。Apps Script 的 nearMinute 不保證準時 09:00。這一頁只顯示說明，沒有建立觸發，也不能用來證明正式排程已生效。今天是週' + weekdayName(taipeiToday()) + '，若在正式系統，下一個說明中的推播日是 ' + nextRun(taipeiToday()) + '。</div>';
+    html += '<div class="warn">正式系統若建立觸發，目標是 Asia/Taipei 週一、四、六 09:00。Google 文件寫 nearMinute(0) 為該分鐘加減約 15 分鐘，大約 08:45 到 09:15，不是準時 09:00，也不是「09 分」。這一頁沒有建立觸發，本機測試也不能證明正式環境準時。今天是週' + weekdayName(taipeiToday()) + '，下一個說明中的目標日是 ' + nextRun(taipeiToday()) + '。</div>';
     if (!drawn) return html + '<div class="empty">按「重新抽樣」預覽。群組抽未認領的人；個人抽你已認領且到了回訪週期的人。</div>';
     var pendingIn = drawn.list.filter(function (p) { return p.attendanceStatus === 'pending' || p.tier === '待核實'; }).length;
     var dup = uniqueOk(drawn.list) ? '這次沒有重複' : '有重複';

@@ -4,7 +4,8 @@
  * 本檔不含聖徒名單、LINE userId、試算表 ID、權杖。請放在指令碼屬性（見《部署與遷移》）。
  *
  * 排程：每週一、四、六 09:00（Asia/Taipei）個人＋兩個群組共用 sendReminders；每月 1 日 08:00 月報。
- * Apps Script 的 atHour().nearMinute(0) 只保證在該小時內接近該分鐘，不保證準時 09:00。
+ * Apps Script 的 nearMinute(0) 是指定分鐘加減約 15 分鐘（官方說明），不是「09 分」，也不能保證準時 09:00。
+ * 觸發時區用 inTimezone('Asia/Taipei')。本機測試只檢查這個參數。
  *
  * 抽樣暫定（待調整）：群組抽「未認領推薦」、個人抽「本人已認領回訪」，分開抽。
  * 比例 A 2、B 2、C 或 D 合計 4。池不足只抽實際人數，不重複、不跨級補齊。待核實不進 C/D。
@@ -14,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-release-2';
+var API_VERSION = '2026-11-release-3';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -43,7 +44,7 @@ var CONFIG = {
   RUN_HOUR: 9,
   MONTHLY_HOUR: 8,
   MAX_ROWS_IN_BUBBLE: 8,
-  SCHEDULE_NOTE: 'Apps Script 時間觸發 atHour(9).nearMinute(0) 只會在該小時內接近 09 分執行，不保證準時 09:00。'
+  SCHEDULE_NOTE: '每週觸發是 Asia/Taipei 週一、四、六 atHour(9).nearMinute(0)。Google 文件寫 nearMinute 為指定分鐘加減約 15 分鐘，所以大約落在台北時間 08:45 到 09:15，不是準時 09:00，也不是「09 分」。月報是每月 1 日 atHour(8).nearMinute(0)，大約 07:45 到 08:15。本機測試只檢查時區與參數，不能證明正式環境準時執行。'
 };
 var WEEK_HEADERS = ('2025-12-29,2026-01-05,2026-01-12,2026-01-19,2026-01-26,2026-02-02,2026-02-09,2026-02-16,2026-02-23,2026-03-02,2026-03-09,2026-03-16,2026-03-23,2026-03-30,2026-04-06,2026-04-13,2026-04-20,2026-04-27,2026-05-04,2026-05-11,2026-05-18,2026-05-25,2026-06-01,2026-06-08,2026-06-15,2026-06-22,2026-06-29,2026-07-06,2026-07-13,2026-07-20,2026-07-27,2026-08-03,2026-08-10,2026-08-17,2026-08-24,2026-08-31,2026-09-07,2026-09-14,2026-09-21,2026-09-28,2026-10-05,2026-10-12,2026-10-19').split(',');
 var ROSTER_MANIFEST_V1 = {
@@ -758,7 +759,7 @@ function liveDelta_(counts, manifest) {
 }
 function buildMigrationPlan_(input) {
   input = input || {};
-  var errors = [], warnings = [];
+  var errors = [], warnings = (input.warnings || []).slice();
   var existing = input.existingIndex || [];
   var bySource = {}, byLegacy = {}, seqMax = {};
   existing.forEach(function (e) {
@@ -826,14 +827,27 @@ function buildMigrationPlan_(input) {
       sourceTab: src ? '原始出席' : p.tab, sourceRow: src ? src.sourceRow : p.row, active: 'Y', mergedInto: ''
     });
   });
-  src24.filter(function (r) { return r.tier === 'B'; }).sort(function (a, b) { return a.sourceRow - b.sourceRow; }).forEach(function (r) {
-    var sk = sourceKey_('2-4', '原始出席', r.sourceRow);
+  if (!input.sourceB) {
+    src24.filter(function (r) { return r.tier === 'B'; }).sort(function (a, b) { return a.sourceRow - b.sourceRow; }).forEach(function (r) {
+      var sk = sourceKey_('2-4', '原始出席', r.sourceRow);
+      var prev = bySource[sk];
+      var id = freeze('2-4', r.norm, '', sk);
+      people.push({
+        stableId: id.id, seq: id.seq, legacyKey: '', sourceKey: sk, district: '2-4', tier: 'B', tab: 'B 穩定', row: 0,
+        name: r.name, norm: r.norm, group: r.group, att: r.att, absent: r.absent, by: prev && prev.by ? prev.by : '', attendanceStatus: 'verified',
+        area: r.area, small: r.small, rank: r.rank, sourceTab: '原始出席', sourceRow: r.sourceRow, active: 'Y', mergedInto: ''
+      });
+    });
+  }
+  (input.sourceB || []).slice().sort(function (a, b) { return a.sourceRow - b.sourceRow; }).forEach(function (r) {
+    var norm = normalizeName_(r.name);
+    var sk = sourceKey_('2-4', 'B 穩定', r.sourceRow);
     var prev = bySource[sk];
-    var id = freeze('2-4', r.norm, '', sk);
+    var id = freeze('2-4', norm, '', sk);
     people.push({
       stableId: id.id, seq: id.seq, legacyKey: '', sourceKey: sk, district: '2-4', tier: 'B', tab: 'B 穩定', row: 0,
-      name: r.name, norm: r.norm, group: r.group, att: r.att, absent: r.absent, by: prev && prev.by ? prev.by : '', attendanceStatus: 'verified',
-      area: r.area, small: r.small, rank: r.rank, sourceTab: '原始出席', sourceRow: r.sourceRow, active: 'Y', mergedInto: ''
+      name: String(r.name).trim(), norm: norm, group: r.group, att: r.att, absent: r.absent, by: prev && prev.by ? prev.by : '', attendanceStatus: 'verified',
+      area: r.area || '', small: r.small || '', rank: r.rank || '', sourceTab: 'B 穩定', sourceRow: r.sourceRow, active: 'Y', mergedInto: ''
     });
   });
   function addPending(rows, district) {
@@ -930,25 +944,61 @@ function existingFromIndex_(ss) {
   if (!idx) return [];
   return idx.map(personFromIndex_);
 }
+function parseGradeTab_(grid) {
+  if (!grid || !grid.length) throw new Error('B 穩定沒有表頭，已停止');
+  var h = grid[0].map(function (x) { return String(x == null ? '' : x).trim(); });
+  if (h[0] !== '姓名' || h[1] !== '群組' || h[2] !== '出席' || h[3] !== '缺席') {
+    throw new Error('B 穩定第 1 列應為「姓名、群組、出席、缺席」，可再加「大區、小區、排」。已停止');
+  }
+  var hasArea = h[4] === '大區' && h[5] === '小區' && h[6] === '排';
+  var rows = [];
+  for (var i = 1; i < grid.length; i++) {
+    if (grid[i][0] == null || String(grid[i][0]).trim() === '') continue;
+    rows.push({
+      sourceRow: i + 1, name: String(grid[i][0]).trim(), group: grid[i][1] == null ? '' : grid[i][1],
+      att: grid[i][2], absent: grid[i][3],
+      area: hasArea ? (grid[i][4] || '') : '', small: hasArea ? (grid[i][5] || '') : '', rank: hasArea ? (grid[i][6] || '') : ''
+    });
+  }
+  return rows;
+}
 function collectMigrationInput_(ss) {
   var props = PropertiesService.getScriptProperties();
+  var id24 = props.getProperty('SOURCE_24_SHEET_ID');
   var id26 = props.getProperty('SOURCE_26_SHEET_ID');
   var id27 = props.getProperty('SOURCE_27_SHEET_ID');
-  if (!id26 || !id27) return { error: '尚未設定 SOURCE_26_SHEET_ID 或 SOURCE_27_SHEET_ID，已停止' };
-  if (!ss.getSheetByName('原始出席')) return { error: '工作簿沒有「原始出席」，已停止' };
-  var ss26, ss27;
-  try { ss26 = SpreadsheetApp.openById(id26); ss27 = SpreadsheetApp.openById(id27); }
-  catch (e) { return { error: '無法開啟新區工作簿' }; }
-  var sh26 = ss26.getSheetByName('出席'), sh27 = ss27.getSheetByName('出席');
-  if (!sh26 || !sh27) return { error: '新區工作簿缺少「出席」分頁，已停止' };
+  if (!id24 || !id26 || !id27) return { error: '尚未設定 SOURCE_24_SHEET_ID、SOURCE_26_SHEET_ID 或 SOURCE_27_SHEET_ID，已停止。B 不在正式認領表。' };
+  var bTab = props.getProperty('SOURCE_24_B_TAB') || 'B 穩定';
+  var attTab = props.getProperty('SOURCE_24_ATTENDANCE_TAB') || '原始出席';
+  var tab26 = props.getProperty('SOURCE_26_TAB') || '出席';
+  var tab27 = props.getProperty('SOURCE_27_TAB') || '出席';
+  var ss24, ss26, ss27;
   try {
+    ss24 = SpreadsheetApp.openById(id24);
+    ss26 = SpreadsheetApp.openById(id26);
+    ss27 = SpreadsheetApp.openById(id27);
+  } catch (e) { return { error: '無法開啟來源工作簿，已停止' }; }
+  var bSheet = ss24.getSheetByName(bTab);
+  if (!bSheet) return { error: '2-4 來源沒有分頁「' + bTab + '」。正式認領表只有 A/C/D，B 必須來自這個分頁。已停止' };
+  var sh26 = ss26.getSheetByName(tab26), sh27 = ss27.getSheetByName(tab27);
+  if (!sh26 || !sh27) return { error: '2-6 或 2-7 來源缺少出席分頁「' + tab26 + '」／「' + tab27 + '」，已停止' };
+  var warnings = [];
+  var source24 = [];
+  var attSheet = ss24.getSheetByName(attTab);
+  try {
+    var sourceB = parseGradeTab_(bSheet.getDataRange().getValues());
+    if (attSheet) source24 = parseAttendanceGrid_(attSheet.getDataRange().getValues(), '2-4');
+    else warnings.push('2-4 來源沒有「' + attTab + '」。A/C/D 只沿用正式表現況；B 只讀「' + bTab + '」第 1 列表頭、第 2 列起。');
     return {
       legacy: readLegacyRows_(ss),
-      source24: parseAttendanceGrid_(ss.getSheetByName('原始出席').getDataRange().getValues(), '2-4'),
+      source24: source24,
+      sourceB: sourceB,
       source26: parseAttendanceGrid_(sh26.getDataRange().getValues(), '2-6'),
       source27: parseAttendanceGrid_(sh27.getDataRange().getValues(), '2-7'),
       visits: readVisits_(ss).map(function (v) { return { key: v.key, name: v.name, tab: v.tab }; }),
-      existingIndex: existingFromIndex_(ss)
+      existingIndex: existingFromIndex_(ss),
+      warnings: warnings,
+      sourceSpec: { sheet24: 'SOURCE_24_SHEET_ID', bTab: bTab, bHeaderRow: 1, bDataStartRow: 2, attendanceTab: attSheet ? attTab : '', attendanceHeaderRow: 3, tab26: tab26, tab27: tab27, newHeaderRow: 3, newDataStartRow: 4 }
     };
   } catch (e2) { return { error: String(e2.message || e2) }; }
 }
@@ -1386,7 +1436,7 @@ function setupTriggers() {
   });
   ScriptApp.newTrigger('sendMonthlySummary').timeBased().onMonthDay(1).atHour(CONFIG.MONTHLY_HOUR).nearMinute(0).inTimezone(CONFIG.TZ).create();
   try { var ss = openSs_(); visitSheet_(ss); logSheet_(ss); } catch (e) {}
-  Logger.log('已建立每週一、四、六 09:00（Asia/Taipei）sendReminders，每月 1 日 08:00 月報。個人與兩個群組共用這三個每週觸發，不再排一三五 08:00 或群組一四 08:00。' + CONFIG.SCHEDULE_NOTE + ' 其他觸發保留 ' + others + ' 個。');
+  Logger.log('已建立每週一、四、六的 sendReminders，以及每月 1 日的月報。時區是 Asia/Taipei。nearMinute(0) 依 Google 文件是指定分鐘加減約 15 分鐘，不是準時，也不是「09 分」。' + CONFIG.SCHEDULE_NOTE + ' 其他觸發保留 ' + others + ' 個。');
 }
 function groupOn_() { return PropertiesService.getScriptProperties().getProperty('GROUP_PUSH_ENABLED') === 'true'; }
 function sendReminders() {

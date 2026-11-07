@@ -155,7 +155,7 @@ function render(){
     '<div class="filters" style="display:'+(FILTER_TABS[S.tab]?'flex':'none')+'"><input id="q" placeholder="搜尋姓名" value="'+esc(S.q)+'">'+
     '<select id="g"><option value="">全部群組</option>'+groups.map(g=>'<option'+(g===S.g?' selected':'')+'>'+esc(g)+'</option>').join('')+'</select></div></header>'+
     '<div id="friendBox">'+friendHtml()+'</div><main id="list"></main>'+
-    '<p class="note-line">推播暫定每週一、四、六上午（實際可能晚數分鐘）。群組抽「未認領推薦」、個人抽「本人已認領回訪」，這裡仍可查完整名單。B 每月回訪；待核實可認領，但不會當成 D 推播。</p>'+
+    '<p class="note-line">推播暫定為台北時間週一、四、六 09:00 前後約 15 分鐘，不能當成準時。群組抽「未認領推薦」、個人抽「本人已認領回訪」，這裡仍可查完整名單。B 每月回訪；待核實可認領，但不會當成 D 推播。</p>'+
     (S.readOnly?'':'<footer><button id="ok">確認認領</button></footer>');
   bindSeg();
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;render();});

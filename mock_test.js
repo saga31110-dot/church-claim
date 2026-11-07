@@ -31,7 +31,8 @@ const pushes=[],fetches=[];let props={LOGIN_CHANNEL_ID:'123',JOSEPH_TOKEN:'test-
 let quota={value:200,used:50};
 const triggers=[];const GROUPS={Cgood:{name:'一杯好咖啡',count:12},Cother:{name:'別的群組',count:5},Cpillar:{name:'2-4柱子們',count:6}};
 function tb(fn){const t={fn,spec:{},getHandlerFunction:()=>fn};const b={timeBased:()=>b,onWeekDay:d=>(t.spec.day=d,b),onMonthDay:d=>(t.spec.mday=d,b),atHour:h=>(t.spec.hour=h,b),nearMinute:m=>(t.spec.min=m,b),inTimezone:z=>(t.spec.tz=z,b),create:()=>{triggers.push(t);return t}};return b;}
-const ctx={Date:FakeDate,Math,SpreadsheetApp:{openById:id=>{if(id && id!=='TEST_SHEET' && id!==props.SHEET_ID && id!==props.SOURCE_26_SHEET_ID && id!==props.SOURCE_27_SHEET_ID) throw new Error('refused spreadsheet '+id); return ss;},flush(){}},
+const workbooks={TEST_SHEET:ss};
+const ctx={Date:FakeDate,Math,SpreadsheetApp:{openById:id=>{if(!workbooks[id]) throw new Error('refused spreadsheet '+id); return workbooks[id];},flush(){}},
  PropertiesService:{getScriptProperties:()=>({getProperty:k=>props[k]||null,setProperty:(k,v)=>{props[k]=String(v)},deleteProperty:k=>{delete props[k]}})},
  LockService:{getScriptLock:()=>({waitLock(){},releaseLock(){}})},Logger:{log:s=>ctx._log.push(String(s))},_log:[],
  Utilities:{formatDate:(d,tz,f)=>{assert.strictEqual(f,'yyyy-MM-dd');return fmt(d,tz)},getUuid:()=>require('crypto').randomUUID()},
@@ -77,7 +78,7 @@ assert(ctx.CONFIG.EXEC_URL.endsWith('/exec'));
 assert.strictEqual(ctx.CONFIG.RUN_DAYS,'一四六');
 assert.strictEqual(ctx.CONFIG.RUN_HOUR,9);
 assert.strictEqual(ctx.CONFIG.MONTHLY_HOUR,8);
-assert(ctx.CONFIG.SCHEDULE_NOTE.includes('不保證')&&ctx.CONFIG.SCHEDULE_NOTE.includes('09'));
+assert(/加減約 15 分鐘/.test(ctx.CONFIG.SCHEDULE_NOTE)&&/08:45/.test(ctx.CONFIG.SCHEDULE_NOTE)&&/Asia\/Taipei/.test(ctx.CONFIG.SCHEDULE_NOTE)&&/不是「09 分」/.test(ctx.CONFIG.SCHEDULE_NOTE));
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.A,2);
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.B,2);
 assert.strictEqual(ctx.SAMPLE_SPEC.counts.CD,4);
@@ -159,7 +160,8 @@ assert.strictEqual(monthly.length,1);
 assert.strictEqual(monthly[0].spec.hour,8);
 assert.strictEqual(monthly[0].spec.mday,1);
 assert(!weekly.some(t=>t.spec.day==='WED'||t.spec.day==='FRI'||t.spec.hour===8));
-assert(ctx._log.at(-1).includes('不保證')&&ctx._log.at(-1).includes('09:00'));
+assert(/15 分鐘/.test(ctx._log.at(-1))&&/08:45/.test(ctx._log.at(-1))&&/Asia\/Taipei/.test(ctx._log.at(-1))&&/不是「09 分」/.test(ctx._log.at(-1)));
+assert(weekly.every(t=>t.spec.tz==='Asia/Taipei'&&t.spec.min===0&&t.spec.hour===9));
 props.GROUP_PUSH_DAYS='一三五';props.PERSONAL_DAYS='一三五';ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').every(t=>['MON','THU','SAT'].includes(t.spec.day)&&t.spec.hour===9));
 delete props.GROUP_PUSH_DAYS;delete props.PERSONAL_DAYS;
@@ -171,7 +173,7 @@ assert(triggers.some(t=>t.fn==='keepMe'));
 ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
 const health=JSON.parse(ctx.doGet().s);
-assert.strictEqual(health.apiVersion,'2026-11-release-2');
+assert.strictEqual(health.apiVersion,'2026-11-release-3');
 assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0);
 let ready=ctx.releaseReadiness();
 assert(ready.ok&&ready.reminderTriggers>0);
@@ -301,7 +303,7 @@ withSs(priv,()=>{
   x=call({action:'bindObserver',idToken:'tok10'});assert(!x.ok);ok('bound saint cannot switch itself to observer');
   x=call({action:'bindObserver',idToken:'tok11'});assert(x.ok&&x.role==='observer');ok('more than one observer is allowed');
   const namesBefore=priv.names().slice();
-  x=ctx.collectMigrationInput_(priv);assert(x.error&&/SOURCE_26/.test(x.error));eqJ(priv.names(),namesBefore);ok('migration refuses before source ids exist and writes nothing');
+  x=ctx.collectMigrationInput_(priv);assert(x.error&&/SOURCE_24_SHEET_ID/.test(x.error));eqJ(priv.names(),namesBefore);ok('migration refuses before 2-4/2-6/2-7 source ids exist and writes nothing');
 });
 
 const repair=makeSs({'A 優先':[HH,['甲','G',5,4,'聖徒六'],['乙','G',3,6,'聖徒六']],'C 近期斷線':[HH],'D 全年未出席':[HH],'LINE綁定':[['userId','displayName','聖徒姓名','綁定時間','角色'],['U1','管理者顯示','管理者',new RealDate(),'saint'],['Ubad','占用顯示名','聖徒六',new RealDate(),'saint'],['U2','二號','聖徒二',new RealDate(),'saint']]});
@@ -404,6 +406,36 @@ assert(keptB.ok,keptB.errors.join(';'));
 assert.strictEqual(keptB.people.find(p=>p.tier==='B').by,'示範服事者甲');ok('re-import keeps a B claim instead of blanking it');
 props.MIGRATION_MANIFEST_JSON=JSON.stringify({manifestVersion:1,id:'bad',districts:{},gates:['claims']});
 assert(ctx.activeManifest_().invalid);delete props.MIGRATION_MANIFEST_JSON;ok('a manifest that gates claim counts is rejected');
+function attGrid(rows){
+  const header=['#','姓名','大區','小區','排','群組','出席','出席率','最近出席','缺席週'].concat(ctx.WEEK_HEADERS);
+  const g=[['標題'],['副標'],header];
+  rows.forEach(r=>{const line=['',r.name,'','','',r.group,r.att,'','',r.absent]; for(let i=0;i<43;i++) line.push(0); g.push(line);});
+  return g;
+}
+const src24=makeSs({'B 穩定':[['姓名','群組','出席','缺席','大區','小區','排'],['示範B01','示範群組一',40,0,'大','小','1'],['甲','青職',40,1,'','','']],'錯誤表':[['名字','群']]});
+const src26=makeSs({'出席':attGrid([{name:'示範P2601',group:'示範群組二',att:0,absent:43}])});
+const src27=makeSs({'出席':attGrid([{name:'示範P2701',group:'示範群組三',att:0,absent:43}])});
+workbooks.SRC24=src24; workbooks.SRC26=src26; workbooks.SRC27=src27;
+props.SOURCE_24_SHEET_ID='SRC24'; props.SOURCE_26_SHEET_ID='SRC26'; props.SOURCE_27_SHEET_ID='SRC27';
+const live=makeSs({'A 優先':[HH,['甲','青職',5,4,'管理者']],'C 近期斷線':[HH,['丙','青壯',1,20,'']],'D 全年未出席':[HH,['丁','大學',0,43,'']]});
+const got=ctx.collectMigrationInput_(live);
+assert(got.sourceB&&got.sourceB.length===2&&got.sourceB[0].sourceRow===2&&got.sourceB[0].area==='大', JSON.stringify(got.error||got.sourceSpec));
+assert.strictEqual(got.source24.length,0);
+assert.strictEqual(got.sourceSpec.bHeaderRow,1);
+assert.strictEqual(got.sourceSpec.newHeaderRow,3);
+const fromTabs=ctx.buildMigrationPlan_(got);
+assert(fromTabs.ok||fromTabs.errors.join, fromTabs.errors&&fromTabs.errors.join(';'));
+assert(!fromTabs.manifestId);
+const bPeople=fromTabs.people.filter(p=>p.tier==='B');
+assert.strictEqual(bPeople.length,2);
+assert(bPeople.some(p=>p.name==='甲')&&fromTabs.people.filter(p=>p.name==='甲'&&p.tier==='A').length===1);
+assert(bPeople.every(p=>p.sourceTab==='B 穩定'));
+assert(fromTabs.people.some(p=>p.district==='2-6'&&p.attendanceStatus==='pending'&&p.tier!=='D'));
+assert(fromTabs.warnings.some(w=>/沒有「原始出席」/.test(w)));ok('B comes from SOURCE_24 tab B 穩定 row 2, not from the live A/C/D workbook');
+src24.bag['B 穩定'].v[0]=['名字','群','出席','缺席'];
+const badHead=ctx.collectMigrationInput_(live);
+assert(badHead.error&&/第 1 列/.test(badHead.error));ok('wrong B header stops before any write');
+delete props.SOURCE_24_SHEET_ID; delete props.SOURCE_26_SHEET_ID; delete props.SOURCE_27_SHEET_ID;
 const stale=makeSs({'A 優先':[HH,['甲','g',5,4,'管理者']],'C 近期斷線':[HH],'D 全年未出席':[HH]});
 const stalePlan=ctx.buildMigrationPlan_({legacy:ctx.readLegacyRows_(stale),source24:[{sourceRow:4,name:'甲',group:'g',att:5,absent:4}],source26:[],source27:[],visits:[]});
 assert(stalePlan.ok,stalePlan.errors.join(';'));
