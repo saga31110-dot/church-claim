@@ -15,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-release-4';
+var API_VERSION = '2026-11-release-5';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -54,7 +54,10 @@ var ROSTER_MANIFEST_V1 = {
   note: '只核對名單結構。認領與回訪不在門檻內，以執行當下的正式表為準，不得用這份參考覆蓋後來新增的資料。',
   districts: { '2-4': { A: 35, B: 16, C: 37, D: 599, total: 687 }, '2-6': { total: 248 }, '2-7': { total: 71 } },
   candidates: 1006,
-  sameNameGroups: 14,
+  sameNameGroups: 12,
+  sameNameRows: 25,
+  reviewNameGroups: 14,
+  reviewNameRows: 30,
   referenceClaims: 139,
   referenceVisits: 22,
   gates: ['districts', 'candidates', 'sameNameGroups', 'pendingNotD']
@@ -381,14 +384,46 @@ function normalizeName_(name) {
   if (typeof s.normalize === 'function') s = s.normalize('NFKC');
   return s.trim();
 }
+function attendanceCount_(v) {
+  if (v == null || v === '') return { ok: true, n: 0 };
+  if (typeof v === 'number' && isFinite(v)) return { ok: true, n: v };
+  var s = String(v).trim();
+  if (typeof s.normalize === 'function') s = s.normalize('NFKC');
+  var frac = s.match(/^(\d+)\s*\/\s*43$/);
+  if (frac) return { ok: true, n: Number(frac[1]) };
+  if (/^\d+$/.test(s)) return { ok: true, n: Number(s) };
+  return { ok: false, n: 0 };
+}
+function absenceWeeks_(v) {
+  if (v == null || v === '') return { ok: true, n: 0 };
+  if (typeof v === 'number' && isFinite(v)) return { ok: true, n: v };
+  var s = String(v).trim();
+  if (typeof s.normalize === 'function') s = s.normalize('NFKC');
+  if (/^\d+$/.test(s)) return { ok: true, n: Number(s) };
+  return { ok: false, n: 0 };
+}
 function classifyVerified_(att, absent) {
   var a = Number(att), b = Number(absent);
-  if (!isFinite(a)) a = 0;
-  if (!isFinite(b)) b = 0;
+  if (!isFinite(a) || !isFinite(b)) return '';
   if (a <= 0) return 'D';
   if (b <= 1) return 'B';
   if (b <= 12) return 'A';
   return 'C';
+}
+function reviewNameKey_(name) {
+  var s = normalizeName_(name).replace(/[\s\u3000]+/g, '');
+  var prev;
+  do {
+    prev = s;
+    s = s.replace(/[-_－＿]*\d+$/, '');
+  } while (s !== prev);
+  return s;
+}
+function nameGroupStats_(keys) {
+  var map = {}, groups = 0, rows = 0;
+  keys.forEach(function (k) { map[k] = (map[k] || 0) + 1; });
+  Object.keys(map).forEach(function (k) { if (map[k] > 1) { groups++; rows += map[k]; } });
+  return { groups: groups, rows: rows };
 }
 function weeksAllZero_(weeks) {
   if (!weeks || weeks.length !== 43) return false;
@@ -710,10 +745,12 @@ function parseAttendanceGrid_(grid, district) {
     if (raw == null || String(raw).trim() === '') continue;
     var weeks = [];
     for (var k = 0; k < 43; k++) weeks.push(grid[r][10 + k]);
+    var att = attendanceCount_(grid[r][6]), abs = absenceWeeks_(grid[r][9]);
+    if (!att.ok || !abs.ok) throw new Error(district + ' 原始出席的「出席」或「缺席週」無法解析（出席應為次數或「次數 / 43」，缺席週應為整數）。已停止，沒有改判為 D');
     rows.push({
-      sourceRow: r + 1, name: String(raw).trim(), group: grid[r][5] == null ? '' : grid[r][5],
+      sourceRow: r + 1, name: String(raw).trim(), rawName: String(raw), group: grid[r][5] == null ? '' : grid[r][5],
       area: grid[r][2] == null ? '' : grid[r][2], small: grid[r][3] == null ? '' : grid[r][3], rank: grid[r][4] == null ? '' : grid[r][4],
-      att: grid[r][6], absent: grid[r][9], weeks: weeks, district: district, allZero: weeksAllZero_(weeks)
+      att: att.n, absent: abs.n, weeks: weeks, district: district, allZero: weeksAllZero_(weeks)
     });
   }
   return rows;
@@ -740,7 +777,8 @@ function structureMismatches_(counts, manifest) {
   if (counts['2-6'] !== (e['2-6'] || {}).total) bad.push('名單結構與 manifest 的 2-6 不符：現況 ' + counts['2-6'] + '，manifest ' + (e['2-6'] || {}).total + '，已停止');
   if (counts['2-7'] !== (e['2-7'] || {}).total) bad.push('名單結構與 manifest 的 2-7 不符：現況 ' + counts['2-7'] + '，manifest ' + (e['2-7'] || {}).total + '，已停止');
   if (manifest.candidates != null && counts.candidates !== manifest.candidates) bad.push('候選人數與 manifest ' + manifest.id + ' 不符：現況 ' + counts.candidates + '，manifest ' + manifest.candidates + '，已停止且不會寫入');
-  if (manifest.sameNameGroups != null && counts.sameNameGroups !== manifest.sameNameGroups) bad.push('同名組數與 manifest 不符：現況 ' + counts.sameNameGroups + '，manifest ' + manifest.sameNameGroups + '，已停止且不會自動合併');
+  if (manifest.sameNameGroups != null && (counts.sameNameGroups !== manifest.sameNameGroups || counts.sameNameRows !== manifest.sameNameRows)) bad.push('精確同名（NFKC 後只去首尾空白；去全部空白結果相同）應為 ' + manifest.sameNameGroups + ' 組 ' + manifest.sameNameRows + ' 列，現況 ' + counts.sameNameGroups + ' 組 ' + counts.sameNameRows + ' 列，已停止且不會自動合併');
+  if (manifest.reviewNameGroups != null && (counts.reviewNameGroups !== manifest.reviewNameGroups || counts.reviewNameRows !== manifest.reviewNameRows)) bad.push('擴大同名候選（NFKC、去全部空白，再去尾端數字及相鄰連字號或底線）應為 ' + manifest.reviewNameGroups + ' 組 ' + manifest.reviewNameRows + ' 列，現況 ' + counts.reviewNameGroups + ' 組 ' + counts.reviewNameRows + ' 列，已停止且不會自動合併');
   if (counts.pendingAsD) bad.push('新區不可判為 D');
   if (counts.pendingNotPending) bad.push('新區出席狀態必須是待核實');
   return bad;
@@ -775,22 +813,31 @@ function buildMigrationPlan_(input) {
     return { id: district + '|' + idPart_(norm) + '|' + seq, seq: seq };
   }
   var legacy = input.legacy || {};
-  var legacyPeople = [];
+  var legacyPeople = [], badAttend = 0, badLegacy = 0;
   LEGACY_TABS.forEach(function (tab) {
     (legacy[tab] || []).forEach(function (r) {
       if (!r.name) return;
+      var attL = attendanceCount_(r.att), absL = absenceWeeks_(r.absent);
+      if (!attL.ok || !absL.ok) badLegacy++;
       legacyPeople.push({
         legacyKey: tab + '|' + r.row, tab: tab, tier: CONFIG.TIER[tab], row: r.row,
-        name: String(r.name), norm: normalizeName_(r.name), group: r.group, att: r.att, absent: r.absent, by: r.by || ''
+        name: String(r.name).trim(), rawName: String(r.name), norm: normalizeName_(r.name), group: r.group,
+        att: attL.ok ? attL.n : r.att, absent: absL.ok ? absL.n : r.absent, by: r.by || ''
       });
     });
   });
+  if (badLegacy) errors.push('正式 A/C/D 有 ' + badLegacy + ' 列的出席次數或連續缺席週數無法解析，已停止');
   var src24 = (input.source24 || []).map(function (r) {
+    var att = attendanceCount_(r.att), abs = absenceWeeks_(r.absent);
+    if (!att.ok || !abs.ok) { badAttend++; return null; }
+    var tier = classifyVerified_(att.n, abs.n);
     return {
-      sourceRow: r.sourceRow, name: String(r.name).trim(), norm: normalizeName_(r.name), group: r.group, att: r.att, absent: r.absent,
-      area: r.area || '', small: r.small || '', rank: r.rank || '', tier: classifyVerified_(r.att, r.absent), weeks: r.weeks || []
+      sourceRow: r.sourceRow, name: String(r.name).trim(), rawName: r.rawName != null ? String(r.rawName) : String(r.name),
+      norm: normalizeName_(r.name), group: r.group, att: att.n, absent: abs.n,
+      area: r.area || '', small: r.small || '', rank: r.rank || '', tier: tier, weeks: r.weeks || []
     };
-  });
+  }).filter(function (r) { return r; });
+  if (badAttend) errors.push('2-4 原始出席有 ' + badAttend + ' 列的「出席」或「缺席週」無法解析，已停止，沒有把這些列改判為 D');
   var srcCount = { A: 0, B: 0, C: 0, D: 0 };
   src24.forEach(function (r) { srcCount[r.tier]++; });
   var legCount = { A: (legacy['A 優先'] || []).filter(function (r) { return r.name; }).length, C: (legacy['C 近期斷線'] || []).filter(function (r) { return r.name; }).length, D: (legacy['D 全年未出席'] || []).filter(function (r) { return r.name; }).length };
@@ -887,8 +934,16 @@ function buildMigrationPlan_(input) {
     if (String(p.name) !== String(v.name)) { errors.push('回訪鍵姓名不符，拒絕改接'); return; }
     visitMap.push({ oldKey: v.key, name: v.name, stableId: p.stableId, already: v.key === p.stableId });
   });
+  var exactKeys = [], nospaceKeys = [], reviewKeys = [];
+  people.forEach(function (p) {
+    var raw = p.rawName != null ? p.rawName : p.name;
+    exactKeys.push(normalizeName_(raw));
+    nospaceKeys.push(normalizeName_(raw).replace(/[\s\u3000]+/g, ''));
+    reviewKeys.push(reviewNameKey_(raw));
+  });
+  var exactGroups = nameGroupStats_(exactKeys), nospaceGroups = nameGroupStats_(nospaceKeys), reviewGroups = nameGroupStats_(reviewKeys);
   var groups = {};
-  people.forEach(function (p) { (groups[p.norm] = groups[p.norm] || []).push(p.stableId); });
+  people.forEach(function (p, i) { var k = exactKeys[i]; (groups[k] = groups[k] || []).push(p.stableId); });
   var sameNameGroups = Object.keys(groups).filter(function (k) { return groups[k].length > 1; }).sort().map(function (k) { return { name: k, ids: groups[k] }; });
   var pendingAsD = people.some(function (p) { return (p.district === '2-6' || p.district === '2-7') && p.tier === 'D'; });
   var pendingNotPending = people.some(function (p) { return (p.district === '2-6' || p.district === '2-7') && p.attendanceStatus !== 'pending'; });
@@ -901,7 +956,10 @@ function buildMigrationPlan_(input) {
     },
     '2-6': people.filter(function (p) { return p.district === '2-6'; }).length,
     '2-7': people.filter(function (p) { return p.district === '2-7'; }).length,
-    sameNameGroups: sameNameGroups.length,
+    sameNameGroups: exactGroups.groups,
+    sameNameRows: exactGroups.rows,
+    reviewNameGroups: reviewGroups.groups,
+    reviewNameRows: reviewGroups.rows,
     claims: people.filter(function (p) { return p.by; }).length,
     visits: visitMap.length,
     pendingAsD: pendingAsD,
@@ -917,7 +975,7 @@ function buildMigrationPlan_(input) {
     sameNameGroups: sameNameGroups, counts: counts, wrote: false,
     manifestId: manifest && manifest.id || '',
     liveDelta: manifest ? liveDelta_(counts, manifest) : liveDelta_(counts, null),
-    diagnosis: { sourceGrade: srcCount, legacyGrade: legCount, signatureMismatchGroups: sigMismatch, unmatchedAttendance: unmatched }
+    diagnosis: { sourceGrade: srcCount, legacyGrade: legCount, signatureMismatchGroups: sigMismatch, unmatchedAttendance: unmatched, sameNameNoSpace: nospaceGroups }
   };
   plan.fingerprint = planFingerprint_(plan);
   return plan;
@@ -938,10 +996,18 @@ function readLegacyRows_(ss) {
     out[tab] = [];
     var sh = ss.getSheetByName(tab);
     if (!sh || sh.getLastRow() < 2) return;
-    var v = sh.getRange(2, 1, sh.getLastRow() - 1, CONFIG.CLAIM_COL).getValues();
+    var header = sh.getRange(1, 1, 1, 8).getValues()[0].map(function (x) { return String(x == null ? '' : x).trim(); });
+    function colOf_(names) { for (var n = 0; n < names.length; n++) { var at = header.indexOf(names[n]); if (at >= 0) return at; } return -1; }
+    var attCol = colOf_(['出席次數/43', '出席次數', '出席']);
+    var absCol = colOf_(['連續缺席週數', '缺席週', '缺席']);
+    if (attCol < 0 || absCol < 0 || header[absCol] === '目前連續缺席週數') {
+      throw new Error(tab + ' 的出席或缺席欄不對。正式表用「出席次數/43」與「連續缺席週數」，不能改用「目前連續缺席週數」。已停止');
+    }
+    var width = Math.max(CONFIG.CLAIM_COL, attCol + 1, absCol + 1);
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, width).getValues();
     v.forEach(function (r, i) {
       if (!r[0]) return;
-      out[tab].push({ row: i + 2, name: r[0], group: r[1], att: r[2], absent: r[3], by: r[4] || '' });
+      out[tab].push({ row: i + 2, name: r[0], group: r[1], att: r[attCol], absent: r[absCol], by: r[4] || '' });
     });
   });
   return out;
@@ -961,9 +1027,11 @@ function parseGradeTab_(grid) {
   var rows = [];
   for (var i = 1; i < grid.length; i++) {
     if (grid[i][0] == null || String(grid[i][0]).trim() === '') continue;
+      var attB = attendanceCount_(grid[i][2]), absB = absenceWeeks_(grid[i][3]);
+    if (!attB.ok || !absB.ok) throw new Error('B 穩定的「出席」或「缺席」無法解析（出席可為次數或「次數 / 43」）。已停止');
     rows.push({
-      sourceRow: i + 1, name: String(grid[i][0]).trim(), group: grid[i][1] == null ? '' : grid[i][1],
-      att: grid[i][2], absent: grid[i][3],
+      sourceRow: i + 1, name: String(grid[i][0]).trim(), rawName: String(grid[i][0]), group: grid[i][1] == null ? '' : grid[i][1],
+      att: attB.n, absent: absB.n,
       area: hasArea ? (grid[i][4] || '') : '', small: hasArea ? (grid[i][5] || '') : '', rank: hasArea ? (grid[i][6] || '') : ''
     });
   }
@@ -1014,7 +1082,7 @@ function safeMigrationReport_(plan, input) {
   return {
     ok: !!plan.ok, wrote: false, apiVersion: API_VERSION, fingerprint: plan.fingerprint || '',
     manifestId: plan.manifestId || '',
-    counts: { A: d.A, B: d.B, C: d.C, D: d.D, total24: d.total, source26: c['2-6'], source27: c['2-7'], candidates: c.candidates, sameNameGroups: c.sameNameGroups, claims: c.claims, visits: c.visits },
+    counts: { A: d.A, B: d.B, C: d.C, D: d.D, total24: d.total, source26: c['2-6'], source27: c['2-7'], candidates: c.candidates, sameNameGroups: c.sameNameGroups, sameNameRows: c.sameNameRows, reviewNameGroups: c.reviewNameGroups, reviewNameRows: c.reviewNameRows, claims: c.claims, visits: c.visits },
     sourceGrade: plan.diagnosis && plan.diagnosis.sourceGrade, legacyGrade: plan.diagnosis && plan.diagnosis.legacyGrade,
     signatureMismatchGroups: plan.diagnosis && plan.diagnosis.signatureMismatchGroups,
     unmatchedAttendance: plan.diagnosis && plan.diagnosis.unmatchedAttendance,

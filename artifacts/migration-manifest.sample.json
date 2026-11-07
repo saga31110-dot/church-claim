@@ -9,7 +9,10 @@
     "2-7": { "total": 71 }
   },
   "candidates": 1006,
-  "sameNameGroups": 14,
+  "sameNameGroups": 12,
+  "sameNameRows": 25,
+  "reviewNameGroups": 14,
+  "reviewNameRows": 30,
   "referenceClaims": 139,
   "referenceVisits": 22,
   "gates": ["districts", "candidates", "sameNameGroups", "pendingNotD"]
