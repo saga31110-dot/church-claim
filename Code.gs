@@ -15,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-release-3';
+var API_VERSION = '2026-11-release-4';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -795,21 +795,27 @@ function buildMigrationPlan_(input) {
   src24.forEach(function (r) { srcCount[r.tier]++; });
   var legCount = { A: (legacy['A 優先'] || []).filter(function (r) { return r.name; }).length, C: (legacy['C 近期斷線'] || []).filter(function (r) { return r.name; }).length, D: (legacy['D 全年未出席'] || []).filter(function (r) { return r.name; }).length };
   if (src24.length && (srcCount.A !== legCount.A || srcCount.C !== legCount.C || srcCount.D !== legCount.D)) {
-    errors.push('2-4 原始出席分級人數與現有 A/C/D 分頁不一致，已停止');
+    errors.push('2-4 原始出席分級與正式分頁不一致：來源 A' + srcCount.A + ' C' + srcCount.C + ' D' + srcCount.D + '，正式分頁 A' + legCount.A + ' C' + legCount.C + ' D' + legCount.D + '，已停止');
   }
   var buckets = {}, legBuckets = {};
   src24.forEach(function (r) { if (r.tier === 'B') return; var s = sigOf_(r.tier, r.name, r.group, r.att, r.absent); (buckets[s] = buckets[s] || []).push(r); });
   legacyPeople.forEach(function (p) { var s = sigOf_(p.tier, p.name, p.group, p.att, p.absent); (legBuckets[s] = legBuckets[s] || []).push(p); });
-  var link = {};
+  var link = {}, sigMismatch = 0, sigMismatchRows = 0;
   Object.keys(legBuckets).forEach(function (s) {
     var Ls = legBuckets[s], Rs = buckets[s] || [];
-    if (Ls.length !== Rs.length) { errors.push('同簽名人數不一致，拒絕配對'); return; }
+    if (!src24.length) return;
+    if (Ls.length !== Rs.length) { sigMismatch++; sigMismatchRows += Math.abs(Ls.length - Rs.length); return; }
     if (Ls.length === 1) link[Ls[0].legacyKey] = Rs[0];
     else warnings.push('同簽名 ' + Ls.length + ' 筆保留原列，不依排序猜測來源列');
   });
-  Object.keys(buckets).forEach(function (s) {
-    if (!legBuckets[s]) errors.push('原始出席有現有分頁沒有的 A/C/D 簽名，已停止以免新增重複的人');
+  var unmatched = { A: 0, C: 0, D: 0 };
+  if (src24.length) Object.keys(buckets).forEach(function (s) {
+    if (legBuckets[s]) return;
+    var tier = s.split('||')[0];
+    if (unmatched[tier] != null) unmatched[tier] += buckets[s].length;
   });
+  if (sigMismatch) errors.push('同簽名群組 ' + sigMismatch + ' 組人數不一致（列差合計 ' + sigMismatchRows + '），已停止，沒有依姓名配對');
+  if (unmatched.A || unmatched.C || unmatched.D) errors.push('原始出席有正式分頁沒有的簽名：A ' + unmatched.A + '、C ' + unmatched.C + '、D ' + unmatched.D + '，已停止');
   var people = [];
   function freeze(district, norm, legacyKey, sourceKey) {
     var prev = (legacyKey && byLegacy[legacyKey]) || (sourceKey && bySource[sourceKey]);
@@ -910,7 +916,8 @@ function buildMigrationPlan_(input) {
     errors: errors.concat(expectedErrors), warnings: warnings, people: people, visitMap: visitMap,
     sameNameGroups: sameNameGroups, counts: counts, wrote: false,
     manifestId: manifest && manifest.id || '',
-    liveDelta: manifest ? liveDelta_(counts, manifest) : liveDelta_(counts, null)
+    liveDelta: manifest ? liveDelta_(counts, manifest) : liveDelta_(counts, null),
+    diagnosis: { sourceGrade: srcCount, legacyGrade: legCount, signatureMismatchGroups: sigMismatch, unmatchedAttendance: unmatched }
   };
   plan.fingerprint = planFingerprint_(plan);
   return plan;
@@ -1002,14 +1009,28 @@ function collectMigrationInput_(ss) {
     };
   } catch (e2) { return { error: String(e2.message || e2) }; }
 }
+function safeMigrationReport_(plan, input) {
+  var c = plan.counts || {}, d = c['2-4'] || {};
+  return {
+    ok: !!plan.ok, wrote: false, apiVersion: API_VERSION, fingerprint: plan.fingerprint || '',
+    manifestId: plan.manifestId || '',
+    counts: { A: d.A, B: d.B, C: d.C, D: d.D, total24: d.total, source26: c['2-6'], source27: c['2-7'], candidates: c.candidates, sameNameGroups: c.sameNameGroups, claims: c.claims, visits: c.visits },
+    sourceGrade: plan.diagnosis && plan.diagnosis.sourceGrade, legacyGrade: plan.diagnosis && plan.diagnosis.legacyGrade,
+    signatureMismatchGroups: plan.diagnosis && plan.diagnosis.signatureMismatchGroups,
+    unmatchedAttendance: plan.diagnosis && plan.diagnosis.unmatchedAttendance,
+    sourceSpec: input && input.sourceSpec || null,
+    errors: plan.errors || [], warnings: plan.warnings || [],
+    liveDeltaNote: plan.liveDelta && plan.liveDelta.note || ''
+  };
+}
 function migrationDryRun() {
   var input = collectMigrationInput_(openSs_());
   if (input.error) { Logger.log(input.error); return { ok: false, wrote: false, error: input.error }; }
   input.manifest = activeManifest_();
   var plan = buildMigrationPlan_(input);
-  plan.wrote = false;
-  Logger.log('遷移 dry-run wrote=false api=' + API_VERSION + ' manifest=' + (input.manifest.id || '') + ' ok=' + plan.ok + ' fingerprint=' + plan.fingerprint + ' candidates=' + plan.counts.candidates + ' liveClaims=' + plan.counts.claims + ' liveVisits=' + plan.counts.visits + ' ' + (plan.liveDelta ? plan.liveDelta.note : ''));
-  return plan;
+  var report = safeMigrationReport_(plan, input);
+  Logger.log(JSON.stringify(report));
+  return report;
 }
 function migrationConfirm() {
   var props = PropertiesService.getScriptProperties();
