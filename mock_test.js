@@ -184,10 +184,13 @@ assert(triggers.some(t=>t.fn==='keepMe'));
 ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
 const health=JSON.parse(ctx.doGet().s);
-assert.strictEqual(health.apiVersion,'2026-11-release-7');
-assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0);
+assert.strictEqual(health.apiVersion,'2026-11-name-link-1');
+assert.strictEqual(health.nameEntry,'row-stable-id');
+assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0&&health.features.indexOf('name-link')>=0);
+assert(health.features.indexOf('co-care')<0&&health.features.indexOf('claimed-group-sample')<0);
+assert(health.apiVersion!=='2026-11-release-7');
 let ready=ctx.releaseReadiness();
-assert(ready.ok&&ready.reminderTriggers>0);
+assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.apiVersion==='2026-11-name-link-1');
 const savedSheet=props.SHEET_ID;delete props.SHEET_ID;
 ready=ctx.releaseReadiness();
 assert(!ready.ok&&String(ready.missingProperties).includes('SHEET_ID'));
@@ -677,5 +680,48 @@ confirmThrew=false;
 try{ctx.restoreConfirm();}catch(e){confirmThrew=true;}
 assert(confirmThrew&&!props.RESTORE_CONFIRM&&ctx._log.some(l=>l.includes('backup-id')&&l.includes('"wrote":false')));ok('restore completion is logged as not written when it stops');
 ['SHEET_ID','SOURCE_24_SHEET_ID','SOURCE_26_SHEET_ID','SOURCE_27_SHEET_ID','MIGRATION_MANIFEST_JSON','MIGRATION_CONFIRM','MIGRATION_FINGERPRINT'].forEach(k=>{if(savedConfirmProps[k]==null)delete props[k];else props[k]=savedConfirmProps[k];});
+
+const linkPeople=[
+  {name:'曾淳棋',tier:'A',stableId:'2-4|曾淳棋|1',key:'2-4|曾淳棋|1',st:{never:true,overdue:0,due:'2026-11-07',today:'2026-11-07'}},
+  {name:'同名',tier:'A',stableId:'2-4|同名|1',key:'2-4|同名|1',st:{never:true,overdue:0,due:'2026-11-07',today:'2026-11-07'}},
+  {name:'同名',tier:'C',stableId:'2-4|同名|2',key:'2-4|同名|2',st:{never:true,overdue:0,due:'2026-11-07',today:'2026-11-07'}}
+];
+const linkBubble=ctx.sampleBubble_('本人已認領回訪','李彥霆 平安！11/7（週六）',linkPeople,'填寫回訪','https://liff.line.me/2012397222-u2XpUCRQ?v=1');
+const linkJson=JSON.stringify(linkBubble);
+function linkUris(node,out){out=out||[];if(!node||typeof node!=='object')return out;if(node.action&&node.action.uri)out.push(node.action.uri);['header','body','footer'].forEach(k=>{if(node[k])linkUris(node[k],out);});if(Array.isArray(node.contents))node.contents.forEach(n=>linkUris(n,out));return out;}
+const uris=linkUris(linkBubble);
+assert.deepStrictEqual(uris,[
+  'https://liff.line.me/2012397222-u2XpUCRQ?k='+encodeURIComponent('2-4|曾淳棋|1'),
+  'https://liff.line.me/2012397222-u2XpUCRQ?k='+encodeURIComponent('2-4|同名|1'),
+  'https://liff.line.me/2012397222-u2XpUCRQ?k='+encodeURIComponent('2-4|同名|2'),
+  'https://liff.line.me/2012397222-u2XpUCRQ?v=1'
+]);
+assert(uris[1]!==uris[2]);
+assert(linkJson.includes('暫定假設')&&linkJson.includes('這不是完整名單')&&linkJson.includes('本人已認領回訪')&&linkJson.includes('尚未回訪'));
+assert.strictEqual(ctx.SAMPLE_SPEC.groupPool,'未認領推薦');
+assert(!fs.readFileSync(path.join(__dirname,'Code.gs'),'utf8').includes('共同照顧'));
+ok('each card row links its own stable ID and the old sample text stays');
+
+const linkSs=makeSs({'A 優先':[H]});
+ctx.writeIndex_(linkSs,[
+  person({stableId:'2-4|同名|1',legacyKey:'A 優先|2',sourceKey:'2-4|A|2',district:'2-4',tier:'A',tab:'A 優先',row:2,name:'同名',norm:'同名',seq:1,group:'一',att:1,absent:1,attendanceStatus:'verified',by:'管理者',sourceTab:'A 優先',sourceRow:2}),
+  person({stableId:'2-4|同名|2',legacyKey:'A 優先|3',sourceKey:'2-4|A|3',district:'2-4',tier:'A',tab:'A 優先',row:3,name:'同名',norm:'同名',seq:2,group:'二',att:1,absent:1,attendanceStatus:'verified',by:'聖徒二',sourceTab:'A 優先',sourceRow:3})
+]);
+withSs(linkSs,()=>{
+  call({action:'bind',idToken:'tok1',saint:'管理者'});
+  call({action:'bind',idToken:'tok2',saint:'聖徒二'});
+  call({action:'bindObserver',idToken:'tok9'});
+  let mine=call({action:'visits',idToken:'tok1'}).people;
+  assert(mine.some(p=>p.key==='2-4|同名|1')&&!mine.some(p=>p.key==='2-4|同名|2'));
+  const wrote=rec('tok1',{key:'2-4|同名|1',name:'同名',date:'2026-11-01',method:'見面',status:'順利聯繫',note:'只屬於一'});
+  assert(wrote.ok&&wrote.people.find(p=>p.key==='2-4|同名|1').history.some(h=>h.note==='只屬於一'));
+  const other=call({action:'visits',idToken:'tok2'}).people.find(p=>p.key==='2-4|同名|2');
+  assert(other&&!other.history.some(h=>h.note==='只屬於一'));
+  assert(!rec('tok2',{key:'2-4|同名|1',name:'同名',date:'2026-11-01',method:'電話',status:'順利聯繫'}).ok);
+  assert(!call({action:'record',idToken:'tok9',key:'2-4|同名|1',name:'同名',date:'2026-11-01',method:'電話',status:'順利聯繫'}).ok);
+  assert(!call({action:'record',idToken:'tok1',key:'2-4|沒有|1',name:'沒有',date:'2026-11-01',method:'電話',status:'順利聯繫'}).ok);
+  linkSs.bag['A 優先']&&assert.strictEqual(linkSs.bag['名單索引'].v.find(r=>r[0]==='2-4|同名|1')[17],'管理者');
+});
+ok('primary claimant can record one stable ID; the same name, a stranger, an observer, and an unknown ID cannot');
 
 console.log('\nALL BACKEND TESTS PASSED');

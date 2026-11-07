@@ -15,7 +15,8 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-release-7';
+var API_VERSION = '2026-11-name-link-1';
+var NAME_ENTRY = 'row-stable-id';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -111,8 +112,8 @@ function adminUserId_() {
 
 function doGet() {
   return ContentService.createTextOutput(JSON.stringify({
-    ok: true, service: '回訪認領 API', apiVersion: API_VERSION,
-    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1']
+    ok: true, service: '回訪認領 API', apiVersion: API_VERSION, nameEntry: NAME_ENTRY,
+    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'name-link']
   })).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
@@ -171,7 +172,7 @@ function handle_(req, user) {
 }
 function initPayload_(ss, acc, user) {
   var base = {
-    ok: true, apiVersion: API_VERSION, saints: saints_(), displayName: user.displayName,
+    ok: true, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, saints: saints_(), displayName: user.displayName,
     sampleAssumption: SAMPLE_SPEC.assumption, scheduleNote: CONFIG.SCHEDULE_NOTE,
     cycles: { A: 7, B: 30, C: 14, D: 30 }
   };
@@ -1450,11 +1451,15 @@ function personRow_(p, kind) {
   var tag = '推薦';
   if (p.st) tag = kind === 'over' ? '逾期 ' + p.st.overdue + ' 天' : p.st.never ? '尚未回訪' : (p.st.due === p.st.today ? '今天' : md_(p.st.due) + ' 到期');
   var mark = p.tier === '待核實' ? '待' : p.tier;
-  return { type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'sm', contents: [
+  var row = { type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'sm', contents: [
     { type: 'box', layout: 'vertical', width: '26px', height: '20px', cornerRadius: '4px', backgroundColor: TIER_COLOR[p.tier] || '#888888', justifyContent: 'center', contents: [txt_(mark, { size: 'xs', color: '#FFFFFF', align: 'center', weight: 'bold' })] },
     txt_(p.name, { size: 'md', weight: 'bold', flex: 4, color: '#222222' }),
     txt_(tag, { size: 'sm', flex: 4, align: 'end', color: kind === 'over' ? '#C62828' : '#8A5A00' })
   ] };
+  var id = p.stableId || p.key;
+  var base = String(cfg_('LIFF_URL') || '').split('?')[0];
+  if (id && base) row.action = { type: 'uri', label: '填寫回訪', uri: base + '?k=' + encodeURIComponent(id) };
+  return row;
 }
 function sampleSections_(people) {
   var over = [], due = [], plain = [];
@@ -1621,10 +1626,10 @@ function releaseReadiness() {
     if (f === 'sendReminders' || f === 'sendMonthlySummary') reminder++;
   });
   var report = {
-    ok: missing.length === 0, apiVersion: API_VERSION, missingProperties: missing,
+    ok: missing.length === 0, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, missingProperties: missing,
     groupPushEnabled: props.getProperty('GROUP_PUSH_ENABLED') === 'true', reminderTriggers: reminder,
     manifest: ROSTER_MANIFEST_V1.id,
-    note: '此檢查不讀取名單、不發送。遷移完成前 reminderTriggers 應為 0。'
+    note: '此檢查不讀取名單、不發送。nameEntry 為 row-stable-id 才是姓名直達修正，apiVersion 2026-11-release-7 不是這次。遷移完成前 reminderTriggers 應為 0。'
   };
   Logger.log(JSON.stringify(report));
   return report;
