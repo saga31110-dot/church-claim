@@ -12,6 +12,8 @@ const dom = new JSDOM(html, {
   beforeParse(window) { window.__TEST__ = true; }
 });
 const { window } = dom;
+window.alert = () => {};
+window.confirm = () => true;
 const app = window.document.getElementById('app');
 const S = window.S;
 S.data = {
@@ -57,8 +59,29 @@ setTimeout(() => {
   assert(visitHtml.includes('B 每月'));
   assert(visitHtml.includes('待核實可記入回訪'));
   const src = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  assert(src.includes('2012397222-u2XpUCRQ'));
-  assert(src.includes('/exec'));
-  console.log('ALL FRONTEND TESTS PASSED');
+  assert(src.includes("const LIFF_ID = '2012397222-u2XpUCRQ'"));
+  assert(src.includes('https://script.google.com/macros/s/AKfycbwo0W9wULIyYuVlmJq9u2EDvFmMJH6DP2kwj-s1NIYrMRCY3WgThjrTSyInuRGpQHFzzw/exec'));
+  assert(!/2026-11-release-[34]/.test(src), 'frontend must not hard-pin release-3 or release-4');
+  assert(!/apiVersion\s*[!=]==\s*['"]2026-11-release-/.test(src), 'frontend must not equality-check apiVersion');
+  window.liff = {
+    init: async () => {},
+    isLoggedIn: () => true,
+    getIDToken: () => 'tok',
+    getFriendship: async () => ({ friendFlag: true }),
+    login: () => { throw new Error('should stay logged in'); }
+  };
+  window.fetch = async () => ({ json: async () => ({
+    ok: true, apiVersion: '2026-11-release-5', bound: true, saint: '管理者', role: 'saint', readOnly: false,
+    data: { 'A 優先': [], 'B 穩定': [], 'C 近期斷線': [], 'D 全年未出席': [], '待核實': [] }
+  }) });
+  window.main().then(() => {
+    assert(!app.innerHTML.includes('後端還沒換成這個版本'), 'release-5 must be accepted');
+    assert(app.innerHTML.includes('我的回訪') || app.innerHTML.includes('認領名單'), 'release-5 init should render');
+    window.fetch = async () => ({ json: async () => ({ ok: true, bound: false, saints: ['管理者'], displayName: '甲' }) });
+    return window.main();
+  }).then(() => {
+    assert(app.innerHTML.includes('後端還沒換成這個版本'), 'a response without apiVersion must still stop');
+    console.log('ALL FRONTEND TESTS PASSED');
+  }).catch((err) => { console.error(err); process.exit(1); });
 }, 30);
 
