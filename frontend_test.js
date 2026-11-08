@@ -83,7 +83,7 @@ setTimeout(() => {
   window.__APP__.render();
   assert(!window.document.querySelector('.mask'), 'form waits until the roster arrives');
   visitsReady();
-  setTimeout(() => {
+  setTimeout(async () => {
   const opened = window.document.querySelector('.mask');
   assert(opened && opened.innerHTML.includes('私密一') && !opened.innerHTML.includes('私密二'));
   S.deepKey = same2; S.deepOpened = '';
@@ -107,6 +107,65 @@ setTimeout(() => {
   assert(!app.innerHTML.includes('私密一'));
   window.__APP__.openDeepVisit();
   assert(!window.document.querySelector('.mask'));
+  assert(src.includes('openLinked(entry.k)'));
+  function openOk(key, note){
+    return { ok:true, apiVersion:'2026-11-name-link-2', nameEntry:'row-stable-id', nameOpen:'one', bound:true, role:'saint', readOnly:false, saint:'管理者', today:'2026-11-09', found:true, person:{
+      key:key, name:'同名', group:'一', district:'2-4', tier:'A', tab:'A 優先', cycle:7, last:'2026-11-01', lastStatus:'順利聯繫', due:'2026-11-08', never:false, overdue:1, pending:false, attendanceStatus:'verified',
+      history:[{ date:'2026-11-01', method:'見面', status:'順利聯繫', saint:'管理者', note:note }]
+    } };
+  }
+  window.liff = { getIDToken: () => 'secret-token' };
+  let releaseSlow;
+  window.fetch = () => new Promise((resolve) => { releaseSlow = resolve; });
+  S.openMs = 5000;
+  const slow = window.__APP__.openLinked(same1);
+  assert.strictEqual(window.document.getElementById('meter').dataset.stage, 'open');
+  assert(app.innerHTML.includes('正在確認這一位'));
+  assert(!window.document.querySelector('.mask'));
+  assert(!app.innerHTML.includes(same1) && !app.innerHTML.includes('secret-token') && !app.innerHTML.includes('私密一'));
+  releaseSlow({ json: async () => openOk(same1, '私密一') });
+  await slow;
+  let openedNow = window.document.querySelector('.mask');
+  assert(openedNow && openedNow.innerHTML.includes('私密一') && !openedNow.innerHTML.includes('私密二'));
+  const pending = [];
+  window.fetch = () => new Promise((resolve) => { pending.push(resolve); });
+  const first = window.__APP__.openLinked(same1);
+  const again = window.__APP__.openLinked(same2);
+  pending[0]({ json: async () => openOk(same1, '私密一') });
+  pending[1]({ json: async () => openOk(same2, '私密二') });
+  await Promise.all([first, again]);
+  openedNow = window.document.querySelector('.mask');
+  assert(openedNow && openedNow.innerHTML.includes('私密二') && !openedNow.innerHTML.includes('私密一'));
+  assert.strictEqual(window.document.querySelectorAll('.mask').length, 1);
+  window.fetch = () => new Promise(() => {});
+  S.openMs = 30;
+  await window.__APP__.openLinked(same1);
+  assert(app.innerHTML.includes('這一位載入逾時'));
+  assert.strictEqual(window.document.getElementById('meter').dataset.stage, 'timeout');
+  assert(!window.document.querySelector('.mask'));
+  assert(!app.innerHTML.includes('私密'));
+  window.fetch = async () => ({ json: async () => openOk(same1, '私密一') });
+  S.openMs = 5000;
+  window.document.getElementById('retry').click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  openedNow = window.document.querySelector('.mask');
+  assert(openedNow && openedNow.innerHTML.includes('私密一'));
+  window.fetch = async () => { throw new Error('down'); };
+  await window.__APP__.openLinked(same2);
+  assert(app.innerHTML.includes('無法載入這一位'));
+  assert(!window.document.querySelector('.mask'));
+  assert(!app.innerHTML.includes('私密'));
+  window.fetch = async () => ({ json: async () => ({ ok:true, apiVersion:'2026-11-name-link-2', nameEntry:'row-stable-id', nameOpen:'one', bound:true, role:'saint', readOnly:false, saint:'管理者', today:'2026-11-09', found:false, person:null }) });
+  await window.__APP__.openLinked('2-4|沒有|1');
+  assert(app.innerHTML.includes('你目前沒有這位的照顧關係'));
+  assert(!app.innerHTML.includes('私密'));
+  assert(!window.document.querySelector('.mask'));
+  window.fetch = async () => ({ json: async () => ({ ok:true, apiVersion:'2026-11-name-link-2', nameEntry:'row-stable-id', nameOpen:'one', bound:true, role:'observer', readOnly:true, saint:null, today:'2026-11-09', found:false, person:null }) });
+  await window.__APP__.openLinked(same1);
+  assert(app.innerHTML.includes('觀察者模式不能填寫回訪，也不顯示回訪紀錄'));
+  assert(!app.innerHTML.includes('私密一'));
+  assert(!window.document.querySelector('.mask'));
+  S.openMs = 0;
   window.liff = {
     init: async () => {},
     isLoggedIn: () => true,
@@ -127,7 +186,15 @@ setTimeout(() => {
     }) });
     return window.main();
   }).then(() => {
-    assert(app.innerHTML.includes('我的回訪') || app.innerHTML.includes('認領名單'), 'name-entry init should render');
+    assert(app.innerHTML.includes('nameOpen'), 'name-link-1 without single-person open must stop');
+    assert(app.innerHTML.includes('2026-11-name-link-1 仍會先載入全部名單'));
+    window.fetch = async () => ({ json: async () => ({
+      ok: true, apiVersion: '2026-11-name-link-2', nameEntry: 'row-stable-id', nameOpen: 'one', bound: true, saint: '管理者', role: 'saint', readOnly: false,
+      data: { 'A 優先': [], 'B 穩定': [], 'C 近期斷線': [], 'D 全年未出席': [], '待核實': [] }
+    }) });
+    return window.main();
+  }).then(() => {
+    assert(app.innerHTML.includes('我的回訪') || app.innerHTML.includes('認領名單'), 'single-person open build should render');
     window.fetch = async () => ({ json: async () => ({ ok: true, bound: false, saints: ['管理者'], displayName: '甲' }) });
     return window.main();
   }).then(() => {

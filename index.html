@@ -62,7 +62,7 @@ const TABS = [['A 優先','A'],['B 穩定','B'],['C 近期斷線','C'],['D 全�
 const FILTER_TABS = {'D 全年未出席':1,'待核實':1};
 const METHODS = ['見面','電話','LINE','其他'];
 const STATUSES = ['順利聯繫','未聯繫上','有需要代禱','願意來聚會'];
-const S = {saint:null,data:null,mode:'claim',tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:'',visits:null,today:'',friend:null,role:null,readOnly:false,deepKey:'',deepMiss:false,deepOpened:'',entryV:''};
+const S = {saint:null,data:null,mode:'claim',tab:'A 優先',pick:new Set(),drop:new Set(),q:'',g:'',visits:null,today:'',friend:null,role:null,readOnly:false,deepKey:'',deepMiss:false,deepOpened:'',entryV:'',ticket:0,holdVisits:false,stage:''};
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
 const md = s => s ? (+s.slice(5,7))+'/'+(+s.slice(8,10)) : '';
@@ -71,14 +71,50 @@ const markOf = t => t==='待核實'?'待':(t||'');
 const colorOf = t => t==='待核實'?'P':(t||'D');
 const isPending = p => !!(p && (p.pending || p.attendanceStatus==='pending' || p.tier==='待核實' || p.tab==='待核實'));
 
-async function api(body){
+function limit(){ return S.openMs || 20000; }
+function withTimeout(work, ms){
+  let timer;
+  const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('timeout'), {code:'timeout'})), ms); });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+async function api(body, opt){
   body.idToken = liff.getIDToken();
-  const r = await fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
-  const j = await r.json();
+  const ms = opt && opt.ms;
+  const work = fetch(API_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)}).then(r => r.json());
+  const j = ms ? await withTimeout(work, ms) : await work;
   if(!j.ok) throw new Error(j.error||'發生錯誤');
   return j;
 }
 function msg(t){ $('app').innerHTML = '<div id="msg">'+esc(t)+'</div>'; }
+function stageText(stage){
+  if(stage==='liff') return '正在連接 LINE…';
+  if(stage==='open') return '正在確認這一位…';
+  if(stage==='list') return '正在載入名單…';
+  return '載入中…';
+}
+function clearMasks(){ document.querySelectorAll('.mask').forEach(n => n.remove()); document.body.style.overflow=''; }
+function showStage(stage){
+  S.stage = stage;
+  clearMasks();
+  $('app').innerHTML = '<div id="msg">'+esc(stageText(stage))+'<div id="meter" data-stage="'+esc(stage)+'"></div></div>';
+}
+function failText(kind){
+  if(S.deepKey) return kind==='timeout' ? '這一位載入逾時。' : '無法載入這一位。';
+  return kind==='timeout' ? '載入逾時。' : '無法載入。';
+}
+function showFail(kind, retry){
+  S.stage = kind;
+  clearMasks();
+  $('app').innerHTML = '<div id="msg">'+esc(failText(kind))+'<div id="meter" data-stage="'+esc(kind)+'"></div><button id="retry" type="button">重試</button></div>';
+  const b = $('retry');
+  if(b) b.onclick = retry || (() => { if(S.deepKey) openLinked(S.deepKey); else main(); });
+}
+function acceptVersion(j){
+  if(!j.apiVersion){ msg('後端還沒換成這個版本（回應沒有 apiVersion）。請先完成 Apps Script 部署，用瀏覽器打開同一個 /exec 看到 apiVersion 後，再使用這份畫面。現在不要把這份前端換成正式入口。'); return false; }
+  if(j.nameEntry !== 'row-stable-id'){ msg('這份畫面需要姓名直達修正（nameEntry 為 row-stable-id）。目前沒有這個標記。2026-11-release-7 不是這次修正。請先部署這次的後端，再用同一個 /exec。'); return false; }
+  if(j.nameOpen !== 'one'){ msg('這份畫面需要單人開啟（nameOpen 為 one）。2026-11-name-link-1 仍會先載入全部名單，不是這次修正。請先部署這次的後端，再用同一個 /exec。'); return false; }
+  return true;
+}
 
 function entryFrom(search){
   const q = new URLSearchParams(search || '');
@@ -101,23 +137,56 @@ function applyEntry(search){
   S.deepOpened = '';
   if(!S.readOnly && (S.entryV === '1' || S.deepKey)) S.mode = 'visit';
 }
-async function main(){
+async function openLinked(key){
+  const ticket = ++S.ticket;
+  S.deepKey = key || S.deepKey || '';
+  if(!S.deepKey){ showFail('fail'); return; }
+  showStage('open');
   try{
-    await liff.init({liffId: LIFF_ID});
+    const j = await api({action:'open', key:S.deepKey}, {ms:limit()});
+    if(ticket !== S.ticket) return;
+    if(!acceptVersion(j)) return;
+    applySession(j);
+    S.today = j.today || S.today;
+    if(!j.bound){ renderBind(j.saints || [], j.displayName || ''); return; }
+    if(S.readOnly){ S.mode = 'claim'; S.deepMiss = false; render(); return; }
+    S.mode = 'visit';
+    S.holdVisits = true;
+    S.deepOpened = '';
+    if(!j.found || !j.person || j.person.key !== S.deepKey){ S.visits = []; S.deepMiss = true; }
+    else { S.visits = [j.person]; S.deepMiss = false; }
+    render();
+  }catch(e){
+    if(ticket !== S.ticket) return;
+    showFail(e && e.message === 'timeout' ? 'timeout' : 'fail');
+  }
+}
+async function main(){
+  const ticket = ++S.ticket;
+  showStage('liff');
+  try{
+    await withTimeout(liff.init({liffId: LIFF_ID}), limit());
+    if(ticket !== S.ticket) return;
     if(!liff.isLoggedIn()){ liff.login({redirectUri: location.href}); return; }
     checkFriend();
-    const j = await api({action:'init'});
-    if(!j.apiVersion) return msg('後端還沒換成這個版本（回應沒有 apiVersion）。請先完成 Apps Script 部署，用瀏覽器打開同一個 /exec 看到 apiVersion 後，再使用這份畫面。現在不要把這份前端換成正式入口。');
-    if(j.nameEntry !== 'row-stable-id') return msg('這份畫面需要姓名直達修正（nameEntry 為 row-stable-id）。目前沒有這個標記。2026-11-release-7 不是這次修正。請先部署這次的後端，再用同一個 /exec。');
+    const entry = entryFrom(location.search);
+    if(entry.k){ applyEntry(location.search); await openLinked(entry.k); return; }
+    showStage('list');
+    const j = await api({action:'init'}, {ms:limit()});
+    if(ticket !== S.ticket) return;
+    if(!acceptVersion(j)) return;
     if(!j.bound){ applyEntry(location.search); return renderBind(j.saints, j.displayName); }
     applySession(j);
     applyEntry(location.search);
     render(); if(!S.readOnly && S.mode==='claim') loadVisits();
-  }catch(e){ msg('無法載入：'+e.message); }
+  }catch(e){
+    if(ticket !== S.ticket) return;
+    showFail(e && e.message === 'timeout' ? 'timeout' : 'fail');
+  }
 }
 function applySession(j){
   S.saint = j.saint || null;
-  S.data = j.data;
+  if(j.data) S.data = j.data;
   S.role = j.role || (j.readOnly ? 'observer' : 'saint');
   S.readOnly = !!j.readOnly || S.role==='observer';
 }
@@ -147,7 +216,7 @@ function renderBind(saints, dn){
   };
 }
 
-function myCount(){ let n=0; for(const t in S.data) (S.data[t]||[]).forEach(p=>{ if(p.by===S.saint && !S.drop.has(p.key)) n++; }); return n + S.pick.size; }
+function myCount(){ if(!S.data) return S.pick.size; let n=0; for(const t in S.data) (S.data[t]||[]).forEach(p=>{ if(p.by===S.saint && !S.drop.has(p.key)) n++; }); return n + S.pick.size; }
 function visible(){
   let L = (S.data&&S.data[S.tab])||[];
   if(FILTER_TABS[S.tab]){ if(S.q) L=L.filter(p=>String(p.name).includes(S.q)); if(S.g) L=L.filter(p=>p.group===S.g); }
@@ -166,8 +235,10 @@ function render(){
   const top = '<div class="top"><span>'+who+'</span>'+(S.readOnly?'':'<span style="font-size:15px;color:#555">我已認領 <span id="cnt">'+myCount()+'</span> 位</span>')+'</div>';
   const banner = S.readOnly ? '<div class="banner">觀察者模式：不必選人、不占用聖徒身分。只能查看完整名單，不能認領或填寫回訪。</div>' : '';
   if(!S.readOnly && S.mode==='visit'){
-    $('app').innerHTML = '<header>'+top+seg+'</header><div id="friendBox">'+friendHtml()+'</div><main id="vlist"><div class="empty">載入中…</div></main>';
-    bindSeg(); loadVisits(); return;
+    $('app').innerHTML = '<header>'+top+seg+'</header><div id="friendBox">'+friendHtml()+'</div><main id="vlist">'+(S.holdVisits?'':'<div class="empty">載入中…</div>')+'</main>';
+    bindSeg();
+    if(S.holdVisits){ S.holdVisits = false; vlist(); openDeepVisit(); return; }
+    loadVisits(); return;
   }
   const pool = (S.data&&S.data[S.tab])||[];
   const groups = [...new Set(pool.map(p=>p.group).filter(Boolean))].sort();
@@ -191,7 +262,9 @@ function bindSeg(){
     if(b.dataset.m===S.mode) return;
     if(S.readOnly){ S.mode='claim'; return; }
     if(S.mode==='claim' && (S.pick.size||S.drop.size) && !confirm('認領的變更還沒送出，確定要離開？')) return;
-    S.pick.clear(); S.drop.clear(); S.mode=b.dataset.m; render(); window.scrollTo(0,0);
+    S.pick.clear(); S.drop.clear(); S.mode=b.dataset.m;
+    if(S.mode==='claim' && !S.data){ loadRoster(); return; }
+    render(); window.scrollTo(0,0);
   });
 }
 function list(){
@@ -228,12 +301,34 @@ async function submit(){
   }catch(e){ alert(e.message); b.disabled=false; b.textContent='確認認領'; }
 }
 
+async function loadRoster(){
+  const ticket = ++S.ticket;
+  showStage('list');
+  try{
+    const j = await api({action:'init'}, {ms:limit()});
+    if(ticket !== S.ticket) return;
+    if(!acceptVersion(j)) return;
+    applySession(j);
+    S.mode = 'claim';
+    render();
+  }catch(e){
+    if(ticket !== S.ticket) return;
+    showFail(e && e.message === 'timeout' ? 'timeout' : 'fail', () => loadRoster());
+  }
+}
 async function loadVisits(){
   if(S.readOnly) return;
+  const ticket = ++S.ticket;
   try{
-    const j = await api({action:'visits'});
+    const j = await api({action:'visits'}, {ms:limit()});
+    if(ticket !== S.ticket) return;
     S.visits=j.people; S.today=j.today; if(S.mode==='visit'){ renderSegBadge(); vlist(); openDeepVisit(); }
-  }catch(e){ if($('vlist')) $('vlist').innerHTML='<div class="empty">無法載入：'+esc(e.message)+'</div>'; }
+  }catch(e){
+    if(ticket !== S.ticket || !$('vlist')) return;
+    const text = e && e.message === 'timeout' ? '回訪名單載入逾時。' : '無法載入回訪。';
+    $('vlist').innerHTML = '<div class="empty">'+esc(text)+'<button id="retryVisits" type="button">重試</button></div>';
+    const b = $('retryVisits'); if(b) b.onclick = () => loadVisits();
+  }
 }
 function renderSegBadge(){
   const b=document.querySelector('.seg button[data-m=visit]'); if(!b) return;
@@ -314,6 +409,6 @@ function openForm(p){
   };
 }
 window.S = S;
-window.__APP__ = { render: render, list: list, submit: submit, openForm: openForm, openDeepVisit: openDeepVisit, applyEntry: applyEntry, entryFrom: entryFrom, applySession: applySession, isPending: isPending };
+window.__APP__ = { render: render, list: list, submit: submit, openForm: openForm, openDeepVisit: openDeepVisit, openLinked: openLinked, applyEntry: applyEntry, entryFrom: entryFrom, applySession: applySession, isPending: isPending };
 if (typeof window !== 'undefined' && !window.__TEST__) main();
 </script></body></html>
