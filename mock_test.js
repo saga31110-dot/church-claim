@@ -184,13 +184,14 @@ assert(triggers.some(t=>t.fn==='keepMe'));
 ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
 const health=JSON.parse(ctx.doGet().s);
-assert.strictEqual(health.apiVersion,'2026-11-name-link-1');
+assert.strictEqual(health.apiVersion,'2026-11-name-link-2');
 assert.strictEqual(health.nameEntry,'row-stable-id');
-assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0&&health.features.indexOf('name-link')>=0);
+assert.strictEqual(health.nameOpen,'one');
+assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0&&health.features.indexOf('name-link')>=0&&health.features.indexOf('name-open')>=0);
 assert(health.features.indexOf('co-care')<0&&health.features.indexOf('claimed-group-sample')<0);
-assert(health.apiVersion!=='2026-11-release-7');
+assert(health.apiVersion!=='2026-11-release-7'&&health.apiVersion!=='2026-11-name-link-1');
 let ready=ctx.releaseReadiness();
-assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.apiVersion==='2026-11-name-link-1');
+assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.nameOpen==='one'&&ready.apiVersion==='2026-11-name-link-2');
 const savedSheet=props.SHEET_ID;delete props.SHEET_ID;
 ready=ctx.releaseReadiness();
 assert(!ready.ok&&String(ready.missingProperties).includes('SHEET_ID'));
@@ -723,5 +724,48 @@ withSs(linkSs,()=>{
   linkSs.bag['A 優先']&&assert.strictEqual(linkSs.bag['名單索引'].v.find(r=>r[0]==='2-4|同名|1')[17],'管理者');
 });
 ok('primary claimant can record one stable ID; the same name, a stranger, an observer, and an unknown ID cannot');
+
+function countIndexReads(book, fn){
+  const sh = book.bag['名單索引'];
+  const orig = sh.getDataRange;
+  let n = 0;
+  sh.getDataRange = function(){ n++; return orig.apply(sh, arguments); };
+  try { const result = fn(); return { n: n, result: result }; }
+  finally { sh.getDataRange = orig; }
+}
+const fastPeople = [];
+for (let i = 0; i < 24; i++) fastPeople.push(person({stableId:'2-4|眾|'+i,legacyKey:'A 優先|'+(i+2),sourceKey:'2-4|A|'+(i+2),district:'2-4',tier:'A',tab:'A 優先',row:i+2,name:'眾'+i,norm:'眾'+i,seq:1,group:'一',att:1,absent:1,attendanceStatus:'verified',by:'管理者',sourceTab:'A 優先',sourceRow:i+2}));
+fastPeople.push(person({stableId:'2-4|同名|1',legacyKey:'A 優先|40',sourceKey:'2-4|A|40',district:'2-4',tier:'A',tab:'A 優先',row:40,name:'同名',norm:'同名',seq:1,group:'一',att:1,absent:1,attendanceStatus:'verified',by:'管理者',sourceTab:'A 優先',sourceRow:40}));
+fastPeople.push(person({stableId:'2-4|同名|2',legacyKey:'A 優先|41',sourceKey:'2-4|A|41',district:'2-4',tier:'A',tab:'A 優先',row:41,name:'同名',norm:'同名',seq:2,group:'二',att:1,absent:1,attendanceStatus:'verified',by:'聖徒二',sourceTab:'A 優先',sourceRow:41}));
+const fast = makeSs({'A 優先':[H],'回訪紀錄':[['時間戳','聖徒','分頁','姓名','回訪日期','方式','狀況','備註','資料鍵','舊資料鍵'],['t','管理者','A 優先','同名','2026-11-01','見面','順利聯繫','只屬於一','2-4|同名|1',''],['t','聖徒二','A 優先','同名','2026-11-02','電話','未聯繫上','只屬於二','2-4|同名|2','']]});
+ctx.writeIndex_(fast, fastPeople);
+withSs(fast, ()=>{
+  call({action:'bind',idToken:'tok1',saint:'管理者'});
+  call({action:'bind',idToken:'tok2',saint:'聖徒二'});
+  call({action:'bindObserver',idToken:'tok9'});
+  const indexBefore = JSON.stringify(fast.bag['名單索引'].v);
+  const visitBefore = JSON.stringify(fast.bag['回訪紀錄'].v);
+  const namesBefore = fast.names().slice().sort();
+  const opened = countIndexReads(fast, () => call({action:'open', idToken:'tok1', key:'2-4|同名|1'}));
+  assert.strictEqual(opened.n, 1);
+  assert(opened.result.found && opened.result.person.key==='2-4|同名|1' && opened.result.nameOpen==='one');
+  assert(opened.result.person.history.some(h=>h.note==='只屬於一') && !opened.result.person.history.some(h=>h.note==='只屬於二'));
+  assert(!opened.result.people && !JSON.stringify(opened.result).includes('U1'));
+  const listed = countIndexReads(fast, () => call({action:'visits', idToken:'tok1'}));
+  assert.strictEqual(listed.n, 1);
+  assert(listed.result.people.length > 20 && listed.result.people.some(p=>p.key==='2-4|同名|1' && p.history.some(h=>h.note==='只屬於一')));
+  assert(!listed.result.people.some(p=>p.key==='2-4|同名|2'));
+  const denied = call({action:'open', idToken:'tok1', key:'2-4|同名|2'});
+  const unknown = call({action:'open', idToken:'tok1', key:'2-4|沒有|1'});
+  const observer = call({action:'open', idToken:'tok9', key:'2-4|同名|1'});
+  [denied, unknown, observer].forEach(x => { assert(x.ok && !x.found && !x.person && !JSON.stringify(x).includes('只屬於')); });
+  assert(observer.readOnly && !denied.readOnly);
+  const full = call({action:'init', idToken:'tok1'});
+  assert(full.data['A 優先'].length > 20 && !JSON.stringify(full.data).includes('只屬於一'));
+  assert.strictEqual(JSON.stringify(fast.bag['名單索引'].v), indexBefore);
+  assert.strictEqual(JSON.stringify(fast.bag['回訪紀錄'].v), visitBefore);
+  assert.deepStrictEqual(fast.names().slice().sort(), namesBefore);
+});
+ok('opening one claimed person reads the index once and does not return anyone else');
 
 console.log('\nALL BACKEND TESTS PASSED');

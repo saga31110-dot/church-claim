@@ -15,8 +15,9 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-name-link-1';
+var API_VERSION = '2026-11-name-link-2';
 var NAME_ENTRY = 'row-stable-id';
+var NAME_OPEN = 'one';
 var CONFIG = {
   LOGIN_CHANNEL_ID: '2012397222',
   LIFF_URL: 'https://liff.line.me/2012397222-u2XpUCRQ',
@@ -112,8 +113,8 @@ function adminUserId_() {
 
 function doGet() {
   return ContentService.createTextOutput(JSON.stringify({
-    ok: true, service: '回訪認領 API', apiVersion: API_VERSION, nameEntry: NAME_ENTRY,
-    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'name-link']
+    ok: true, service: '回訪認領 API', apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN,
+    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'name-link', 'name-open']
   })).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
@@ -157,6 +158,8 @@ function handle_(req, user) {
     case 'visits':
       assertWriter_(acc);
       return { ok: true, today: today_(), people: myVisits_(ss, acc.saint) };
+    case 'open':
+      return openVisit_(ss, acc, user, req.key);
     case 'record':
       assertWriter_(acc);
       return record_(ss, acc.saint, req);
@@ -172,7 +175,7 @@ function handle_(req, user) {
 }
 function initPayload_(ss, acc, user) {
   var base = {
-    ok: true, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, saints: saints_(), displayName: user.displayName,
+    ok: true, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN, saints: saints_(), displayName: user.displayName,
     sampleAssumption: SAMPLE_SPEC.assumption, scheduleNote: CONFIG.SCHEDULE_NOTE,
     cycles: { A: 7, B: 30, C: 14, D: 30 }
   };
@@ -635,12 +638,12 @@ function readVisits_(ss) {
   }
   return out;
 }
-function aliasKeys_(ss, p) {
+function aliasKeys_(ss, p, all) {
   var ids = {};
   if (p.stableId) ids[p.stableId] = 1;
   if (p.legacyKey) ids[p.legacyKey] = 1;
   if (p.key) ids[p.key] = 1;
-  allIndexPeople_(ss).forEach(function (x) {
+  (all || allIndexPeople_(ss)).forEach(function (x) {
     if (x.mergedInto && x.mergedInto === p.stableId) {
       if (x.stableId) ids[x.stableId] = 1;
       if (x.legacyKey) ids[x.legacyKey] = 1;
@@ -672,12 +675,51 @@ function claimedBy_(ss, saint) {
 }
 function myVisits_(ss, saint) {
   visitSheet_(ss);
-  var today = today_(), recs = readVisits_(ss);
-  return claimedBy_(ss, saint).map(function (p) {
-    var s = visitStatus_(p, recs, today, aliasKeys_(ss, p));
+  var today = today_(), recs = readVisits_(ss), all = allIndexPeople_(ss);
+  var claimed = [];
+  all.forEach(function (p) {
+    if (p.active === 'N' || p.mergedInto) return;
+    if (!saint || p.by === saint) claimed.push(p);
+  });
+  return claimed.map(function (p) {
+    var s = visitStatus_(p, recs, today, aliasKeys_(ss, p, all));
     for (var k in s) p[k] = s[k];
     return p;
   }).sort(function (a, b) { return b.overdue - a.overdue || (a.name < b.name ? -1 : 1); });
+}
+function openMeta_(extra) {
+  return Object.assign({
+    ok: true, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN,
+    today: today_(), found: false, person: null
+  }, extra || {});
+}
+function openPerson_(p) {
+  return {
+    key: p.key, name: p.name, group: p.group || '', district: p.district || '', tier: p.tier || '', tab: p.tab || '',
+    cycle: p.cycle, last: p.last || '', lastStatus: p.lastStatus || '', due: p.due || '', never: !!p.never,
+    overdue: p.overdue, pending: !!p.pending, attendanceStatus: p.attendanceStatus || '', history: p.history || []
+  };
+}
+function openVisit_(ss, acc, user, key) {
+  var displayName = user && user.displayName || '';
+  if (!acc) return openMeta_({ bound: false, role: null, readOnly: false, saint: null, displayName: displayName, saints: saints_() });
+  if (acc.role !== 'saint' || !acc.saint) return openMeta_({ bound: true, role: 'observer', readOnly: true, saint: null, displayName: displayName });
+  var wanted = String(key == null ? '' : key).trim();
+  var rows = indexObjects_(ss), all = [], hits = [];
+  if (rows && wanted) {
+    for (var i = 0; i < rows.length; i++) {
+      var p = personFromIndex_(rows[i]);
+      all.push(p);
+      if (p.stableId === wanted || p.key === wanted) hits.push(p);
+    }
+  }
+  var head = { bound: true, role: 'saint', readOnly: false, saint: acc.saint, displayName: displayName };
+  if (hits.length !== 1) return openMeta_(head);
+  var one = hits[0];
+  if (one.active === 'N' || one.mergedInto || one.by !== acc.saint) return openMeta_(head);
+  var st = visitStatus_(one, readVisits_(ss), today_(), aliasKeys_(ss, one, all));
+  for (var k in st) one[k] = st[k];
+  return openMeta_(Object.assign(head, { found: true, person: openPerson_(one) }));
 }
 function cleanText_(s, max) {
   s = String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ').trim().slice(0, max);
@@ -1626,10 +1668,10 @@ function releaseReadiness() {
     if (f === 'sendReminders' || f === 'sendMonthlySummary') reminder++;
   });
   var report = {
-    ok: missing.length === 0, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, missingProperties: missing,
+    ok: missing.length === 0, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN, missingProperties: missing,
     groupPushEnabled: props.getProperty('GROUP_PUSH_ENABLED') === 'true', reminderTriggers: reminder,
     manifest: ROSTER_MANIFEST_V1.id,
-    note: '此檢查不讀取名單、不發送。nameEntry 為 row-stable-id 才是姓名直達修正，apiVersion 2026-11-release-7 不是這次。遷移完成前 reminderTriggers 應為 0。'
+    note: '此檢查不讀取名單、不發送。nameOpen 為 one 才是單人開啟；2026-11-name-link-1 仍會先載入全部名單。遷移完成前 reminderTriggers 應為 0。'
   };
   Logger.log(JSON.stringify(report));
   return report;
