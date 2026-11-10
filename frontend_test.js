@@ -47,6 +47,18 @@ assert(htmlOut.includes('確認認領'));
 assert(htmlOut.includes('>B 穩定<'));
 assert(htmlOut.includes('週一、四、六'));
 assert(htmlOut.includes('未認領推薦') && htmlOut.includes('本人已認領回訪'));
+S.data['A 優先'].push({ key:'2-4|同名|2', stableId:'2-4|同名|2', name:'同名', group:'二', att:1, absent:1, by:'聖徒二', tier:'A', district:'2-4', care:'', coCount:0 });
+S.tab = 'A 優先';
+window.__APP__.render();
+htmlOut = app.innerHTML;
+assert(htmlOut.includes('加入共同照顧') && htmlOut.includes('主要：聖徒二'));
+S.readOnly = true;
+window.__APP__.render();
+assert(!app.innerHTML.includes('加入共同照顧'));
+S.readOnly = false;
+S.data['A 優先'].pop();
+S.tab = 'B 穩定';
+window.__APP__.render();
 
 window.liff = { getIDToken: () => 'tok' };
 window.fetch = async () => ({ json: async () => ({ ok: true, today: '2026-11-09', people: [
@@ -64,7 +76,8 @@ setTimeout(() => {
   assert(src.includes('liff.login({redirectUri: location.href})'));
   assert(!/2026-11-release-[34]/.test(src), 'frontend must not hard-pin release-3 or release-4');
   assert(!/apiVersion\s*[!=]==\s*['"]2026-11-release-/.test(src), 'frontend must not equality-check apiVersion');
-  assert(!src.includes('共同照顧') && !src.includes('加入共同照顧'));
+  assert(src.includes('加入共同照顧') && src.includes('退出共同照顧') && src.includes('未認領推薦') && src.includes('openLinked(entry.k)'));
+  assert(!src.includes('已認領回訪推薦'));
   const id1 = '2-4|曾淳棋|1';
   const same1 = '2-4|同名|1';
   const same2 = '2-4|同名|2';
