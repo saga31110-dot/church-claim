@@ -184,14 +184,14 @@ assert(triggers.some(t=>t.fn==='keepMe'));
 ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
 const health=JSON.parse(ctx.doGet().s);
-assert.strictEqual(health.apiVersion,'2026-11-name-link-2');
+assert.strictEqual(health.apiVersion,'2026-11-multi-claim-1');
 assert.strictEqual(health.nameEntry,'row-stable-id');
 assert.strictEqual(health.nameOpen,'one');
-assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0&&health.features.indexOf('name-link')>=0&&health.features.indexOf('name-open')>=0);
-assert(health.features.indexOf('co-care')<0&&health.features.indexOf('claimed-group-sample')<0);
+assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0&&health.features.indexOf('name-link')>=0&&health.features.indexOf('name-open')>=0&&health.features.indexOf('co-care')>=0);
+assert(health.features.indexOf('claimed-group-sample')<0);
 assert(health.apiVersion!=='2026-11-release-7'&&health.apiVersion!=='2026-11-name-link-1');
 let ready=ctx.releaseReadiness();
-assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.nameOpen==='one'&&ready.apiVersion==='2026-11-name-link-2');
+assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.nameOpen==='one'&&ready.apiVersion==='2026-11-multi-claim-1');
 const savedSheet=props.SHEET_ID;delete props.SHEET_ID;
 ready=ctx.releaseReadiness();
 assert(!ready.ok&&String(ready.missingProperties).includes('SHEET_ID'));
@@ -700,7 +700,8 @@ assert.deepStrictEqual(uris,[
 assert(uris[1]!==uris[2]);
 assert(linkJson.includes('暫定假設')&&linkJson.includes('這不是完整名單')&&linkJson.includes('本人已認領回訪')&&linkJson.includes('尚未回訪'));
 assert.strictEqual(ctx.SAMPLE_SPEC.groupPool,'未認領推薦');
-assert(!fs.readFileSync(path.join(__dirname,'Code.gs'),'utf8').includes('共同照顧'));
+const careSrc=fs.readFileSync(path.join(__dirname,'Code.gs'),'utf8');
+assert(careSrc.includes('暫定假設')&&careSrc.includes("groupPool: '未認領推薦'")&&!careSrc.includes('claimedGroupPool_')&&!careSrc.includes('已認領回訪推薦'));
 ok('each card row links its own stable ID and the old sample text stays');
 
 const linkSs=makeSs({'A 優先':[H]});
@@ -767,5 +768,69 @@ withSs(fast, ()=>{
   assert.deepStrictEqual(fast.names().slice().sort(), namesBefore);
 });
 ok('opening one claimed person reads the index once and does not return anyone else');
+
+const careSs=makeSs({'A 優先':[HH,
+  ['同名','一',5,4,'管理者','2-4|同名|1'],
+  ['同名','二',5,4,'聖徒二','2-4|同名|2'],
+  ['未認','三',5,4,'','2-4|未|1']
+],'B 穩定':[HH],'C 近期斷線':[HH],'D 全年未出席':[HH],'待核實':[HH],
+'名單索引':[['穩定ID','認領者','分頁','分級','姓名','群組','出席狀態','有效','併入'],
+  ['2-4|同名|1','管理者','A 優先','A','同名','一','verified','Y',''],
+  ['2-4|同名|2','聖徒二','A 優先','A','同名','二','verified','Y',''],
+  ['2-4|未|1','','A 優先','A','未認','三','verified','Y','']]});
+withSs(careSs,()=>{
+  call({action:'bind',idToken:'tok1',saint:'管理者'});
+  call({action:'bind',idToken:'tok2',saint:'聖徒二'});
+  call({action:'bind',idToken:'tok4',saint:'聖徒三'});
+  const namesBefore=careSs.names().slice();
+  const init=call({action:'init',idToken:'tok1'});
+  assert(init.ok&&init.nameOpen==='one'&&init.data['A 優先'].find(p=>p.stableId==='2-4|同名|1').care==='primary');
+  assert(!careSs.names().includes('共同照顧')&&JSON.stringify(careSs.names())===JSON.stringify(namesBefore));
+  assert.strictEqual(careSs.bag['A 優先'].v[1][4],'管理者');
+  let x=call({action:'joinCare',idToken:'tok10',key:'2-4|同名|1',name:'同名'});
+  assert(!x.ok&&!careSs.names().includes('共同照顧'));
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|未|1',name:'未認'});
+  assert(!x.ok&&!careSs.bag['共同照顧']);
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(x.ok&&x.wrote&&careSs.bag['共同照顧'].v[0].join()===['穩定ID','共同照顧者','加入時間','狀態','退出時間'].join()&&careSs.bag['共同照顧'].v[1][1]==='聖徒二'&&careSs.bag['共同照顧'].v[1][3]==='共同');
+  x=call({action:'joinCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(x.ok&&x.already&&!x.wrote&&careSs.bag['共同照顧'].v.length===2);
+  assert.strictEqual(careSs.bag['A 優先'].v[1][4],'管理者');
+  assert.strictEqual(careSs.bag['A 優先'].v[2][4],'聖徒二');
+  let vis=call({action:'visits',idToken:'tok2'});
+  assert(vis.people.some(p=>p.key==='2-4|同名|1'&&p.care==='co')&&vis.people.some(p=>p.key==='2-4|同名|2'&&p.care==='primary')&&!vis.people.some(p=>p.key==='2-4|未|1'));
+  setNow('2026-11-09');
+  const recd=call({action:'record',idToken:'tok2',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫',note:'共同紀錄'});
+  assert(recd.ok&&careSs.bag['回訪紀錄'].v[1][1]==='聖徒二'&&careSs.bag['回訪紀錄'].v[1][8]==='2-4|同名|1');
+  const primary=call({action:'visits',idToken:'tok1'}).people.find(p=>p.key==='2-4|同名|1');
+  assert(primary.care==='primary'&&primary.history.some(h=>h.saint==='聖徒二'&&h.note==='共同紀錄'));
+  const sameOpen=call({action:'open',idToken:'tok1',key:'2-4|同名|1'});
+  const coOpen=call({action:'open',idToken:'tok2',key:'2-4|同名|1'});
+  assert(sameOpen.found&&sameOpen.person&&sameOpen.person.history.some(h=>h.note==='共同紀錄'));
+  assert(coOpen.ok&&!coOpen.found&&!coOpen.person&&!JSON.stringify(coOpen).includes('共同紀錄'));
+  assert(!call({action:'record',idToken:'tok4',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'}).ok);
+  call({action:'bindObserver',idToken:'tok9'});
+  const obs=call({action:'record',idToken:'tok9',key:'2-4|同名|1',name:'同名',date:'2026-10-01',method:'電話',status:'順利聯繫'});
+  assert(!obs.ok&&/觀察者/.test(obs.error));
+  const steal=call({action:'submit',idToken:'tok2',claims:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(steal.conflicts.length&&careSs.bag['A 優先'].v[1][4]==='管理者');
+  const removePrimary=call({action:'submit',idToken:'tok2',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(/共同照顧者不能取消主要認領/.test(removePrimary.conflicts[0].reason)&&careSs.bag['A 優先'].v[1][4]==='管理者');
+  const blocked=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(/仍有共同照顧者/.test(blocked.conflicts[0].reason)&&careSs.bag['共同照顧'].v[1][3]==='共同');
+  assert(!call({action:'leaveCare',idToken:'tok1',key:'2-4|同名|1',name:'同名'}).ok);
+  assert(!call({action:'leaveCare',idToken:'tok4',key:'2-4|同名|1',name:'同名'}).ok&&careSs.bag['共同照顧'].v[1][3]==='共同');
+  const planned=ctx.planPersonalSamples_(careSs,'2026-11-09',()=>0);
+  assert(planned.samples['管理者'].list.some(p=>p.stableId==='2-4|同名|1'));
+  assert(!planned.samples['聖徒二'].list.some(p=>(p.stableId||p.key)==='2-4|同名|1'));
+  const left=call({action:'leaveCare',idToken:'tok2',key:'2-4|同名|1',name:'同名'});
+  assert(left.ok&&careSs.bag['共同照顧'].v.length===2&&careSs.bag['共同照顧'].v[1][3]==='已退出'&&careSs.bag['回訪紀錄'].v.length===2);
+  assert(!call({action:'visits',idToken:'tok2'}).people.some(p=>p.key==='2-4|同名|1'));
+  const released=call({action:'submit',idToken:'tok1',releases:[{key:'2-4|同名|1',name:'同名'}]});
+  assert(released.released.length===1&&careSs.bag['A 優先'].v[1][4]===''&&careSs.bag['回訪紀錄'].v[1][8]==='2-4|同名|1');
+});
+assert.strictEqual(ctx.SAMPLE_SPEC.groupPool,'未認領推薦');
+assert(ctx.SAMPLE_SPEC.assumption.indexOf('暫定假設')>=0);
+ok('co-care keeps the primary, stays out of personal reminders, and does not change the group pool');
 
 console.log('\nALL BACKEND TESTS PASSED');

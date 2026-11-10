@@ -270,14 +270,30 @@ function bindSeg(){
 function list(){
   const L=visible();
   $('list').innerHTML = L.length? L.map(p=>{
-    const mine=!S.readOnly && p.by===S.saint, taken=p.by&&!mine;
+    const mine=!S.readOnly && p.by===S.saint, co=!S.readOnly && p.care==='co', taken=p.by&&!mine;
+    const locked = mine && p.coCount>0;
     const checked = mine ? !S.drop.has(p.key) : S.pick.has(p.key);
-    const box = S.readOnly ? '' : '<input type="checkbox" data-k="'+esc(p.key)+'"'+(checked?' checked':'')+(taken?' disabled':'')+'>';
+    const box = S.readOnly ? '' : '<input type="checkbox" data-k="'+esc(p.key)+'"'+(checked?' checked':'')+(taken||locked?' disabled':'')+'>';
+    const who = mine ? '<div class="by">主要照顧者：'+esc(S.saint)+(p.coCount?'（另有 '+p.coCount+' 位共同照顧者，不能直接取消）':'')+'</div>'
+      : co ? '<div class="by">共同照顧者：'+esc(S.saint)+'；主要：'+esc(p.by)+' <button type="button" class="leave" data-k="'+esc(p.key)+'">退出共同照顧</button></div>'
+      : (p.by?'<div class="by">主要：'+esc(p.by)+(!S.readOnly&&p.stableId?' <button type="button" class="join" data-k="'+esc(p.key)+'">加入共同照顧</button>':'')+'</div>':'');
     return '<label class="card'+(taken?' taken':'')+(mine?' mine':'')+'">'+box+
-      '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+metaLine(p)+'</div>'+
-      (p.by?'<div class="by">認領：'+esc(p.by)+'</div>':'')+'</div></label>';
+      '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+metaLine(p)+'</div>'+who+'</div></label>';
   }).join('') : '<div class="empty">沒有符合的資料</div>';
   if(S.readOnly) return;
+  $('list').querySelectorAll('.join').forEach(b=>b.onclick=async e=>{
+    e.preventDefault(); e.stopPropagation();
+    const p=byKey(b.dataset.k); if(!p) return;
+    try{ const j=await api({action:'joinCare', key:p.key, name:p.name}); S.data=j.data; render(); }
+    catch(err){ alert(err.message); }
+  });
+  $('list').querySelectorAll('.leave').forEach(b=>b.onclick=async e=>{
+    e.preventDefault(); e.stopPropagation();
+    const p=byKey(b.dataset.k); if(!p) return;
+    if(!confirm('退出你自己的共同照顧？不會取消主要認領，也不會刪除回訪紀錄。')) return;
+    try{ const j=await api({action:'leaveCare', key:p.key, name:p.name}); S.data=j.data; S.visits=null; render(); }
+    catch(err){ alert(err.message); }
+  });
   $('list').querySelectorAll('input').forEach(i=>i.onchange=()=>{
     const p=(S.data[S.tab]||[]).find(x=>x.key===i.dataset.k);
     if(!p) return;
@@ -352,7 +368,7 @@ function vlist(){
   $('vlist').innerHTML = deepNote()+'<div class="sum"><div class="s1"><b>'+over+'</b><span>逾期／未回訪</span></div><div class="s2"><b>'+due+'</b><span>今天到期</span></div><div class="s3"><b>'+ok+'</b><span>按時中</span></div></div>'+
     L.map((p,i)=>{ const [c,pc,pt]=pill(p);
       return '<div class="vcard '+c+'" data-i="'+i+'"><div class="tier" style="background:var(--'+colorOf(p.tier)+')">'+esc(markOf(p.tier))+'</div>'+
-        '<div><div class="n">'+esc(p.name)+'</div><div class="m">'+esc(p.district?p.district+'・':'')+esc(p.group)+'・'+(p.last?'上次 '+md(p.last)+'（'+esc(p.lastStatus)+'）':'還沒有回訪紀錄')+'</div></div>'+
+        '<div><div class="n">'+esc(p.name)+(p.care==='co'?' <span class="m">共同</span>':'')+'</div><div class="m">'+esc(p.district?p.district+'・':'')+esc(p.group)+'・'+(p.last?'上次 '+md(p.last)+'（'+esc(p.lastStatus)+'）':'還沒有回訪紀錄')+'</div></div>'+
         '<span class="pill '+pc+'">'+pt+'</span></div>'; }).join('')+
     '<div class="empty" style="font-size:14px">回訪週期：A 每週、B 每月、C 每兩週、D 每月。待核實可記入回訪，但不排程推播。個人推播是「本人已認領回訪」的暫定抽樣。</div>';
   $('vlist').querySelectorAll('.vcard').forEach(d=>d.onclick=()=>openForm(L[+d.dataset.i]));
