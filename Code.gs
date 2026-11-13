@@ -15,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-weekly-overview-1';
+var API_VERSION = '2026-11-weekly-overview-2';
 var NAME_ENTRY = 'row-stable-id';
 var NAME_OPEN = 'one';
 var CONFIG = {
@@ -1703,32 +1703,35 @@ function weeklyOverviewContents_(overview, keep) {
   });
   return contents;
 }
-function weeklyOverviewBox_(overview, keep) {
-  if (typeof keep !== 'number') {
-    keep = 999;
-    var box = null;
-    while (keep >= 0) {
-      box = weeklyOverviewBox_(overview, keep);
-      if (JSON.stringify(box).length <= 6000 || keep === 0) return box;
-      keep = keep > 12 ? Math.ceil(keep / 2) : keep - 1;
-    }
-  }
-  return { type: 'box', layout: 'vertical', backgroundColor: '#F4F7FB', cornerRadius: '10px', paddingAll: '12px', margin: 'md', contents: weeklyOverviewContents_(overview, keep) };
-}
-function sampleBubble_(title, whoLine, people, buttonLabel, uri, overview) {
+function sampleBubble_(title, whoLine, people, buttonLabel, uri) {
   var body = sampleSections_(people);
   body.push(txt_(countLine_(people), { size: 'xs', color: '#666666', margin: 'md' }));
   body.push(txt_(SAMPLE_SPEC.assumption, { size: 'xs', color: '#888888', margin: 'sm', wrap: true }));
   body.push(txt_('這不是完整名單。完整名單請打開小頁面。', { size: 'xs', color: '#888888', margin: 'sm' }));
-  if (overview) body.push(weeklyOverviewBox_(overview));
-  var bubble = { type: 'bubble', size: 'mega',
+  return { type: 'bubble', size: 'mega',
     header: { type: 'box', layout: 'vertical', backgroundColor: '#1F6F5C', paddingAll: '16px', contents: [
       txt_(title, { color: '#FFFFFF', weight: 'bold', size: 'xl' }),
       txt_(whoLine, { color: '#D7F2EA', size: 'sm', margin: 'sm' })] },
     body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents: body },
     footer: { type: 'box', layout: 'vertical', contents: [{ type: 'button', style: 'primary', color: '#06C755', height: 'md', action: { type: 'uri', label: buttonLabel, uri: uri } }] } };
-  if (overview && JSON.stringify(bubble).length > 9500) {
-    bubble.body.contents[bubble.body.contents.length - 1] = weeklyOverviewBox_(overview, 0);
+}
+function groupOverviewBubble_(overview) {
+  var total = 0;
+  (overview.rows || []).forEach(function (row) { total += row.count; });
+  function build(keep) {
+    var body = [txt_('認領數只計主要。同一人多筆會標次數；有未聯繫上會標註。', { size: 'xs', color: '#666666', wrap: true })].concat(weeklyOverviewContents_(overview, keep).slice(2));
+    return { type: 'bubble', size: 'mega',
+      header: { type: 'box', layout: 'vertical', backgroundColor: '#1F6F5C', paddingAll: '16px', contents: [
+        txt_('本週回訪總覽', { color: '#FFFFFF', weight: 'bold', size: 'xl' }),
+        txt_(md_(overview.from) + '–' + md_(overview.to) + '・合計 ' + total + ' 筆', { color: '#D7F2EA', size: 'sm', margin: 'sm', wrap: true })] },
+      body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents: body },
+      footer: { type: 'box', layout: 'vertical', contents: [{ type: 'button', style: 'primary', color: '#06C755', height: 'md', action: { type: 'uri', label: '打開小頁面', uri: cfg_('LIFF_URL') } }] } };
+  }
+  var keep = 999, bubble = null;
+  while (keep >= 0) {
+    bubble = build(keep);
+    if (JSON.stringify(bubble).length <= 9500 || keep === 0) return bubble;
+    keep = keep > 12 ? Math.ceil(keep / 2) : keep - 1;
   }
   return bubble;
 }
@@ -1803,18 +1806,13 @@ function pushGroupReminder() {
   if (!props.getProperty('JOSEPH_TOKEN')) { log_(ss, '群組抽樣', names.join('、'), '', '', '失敗', '尚未設定指令碼屬性 JOSEPH_TOKEN'); return 0; }
   var pending = names.filter(function (n) { return !sentToday_(ss, '群組抽樣', n, today); });
   if (!pending.length) { log_(ss, '群組抽樣', '（全部）', '', '', '略過', '同日已送出'); return 0; }
-  var keys = savedSampleKeys_(ss, today, SAMPLE_SPEC.groupPool);
-  var sample = keys ? peopleByKeys_(ss, keys) : null;
-  if (!sample) {
-    sample = drawSample_(poolsFrom_(unclaimedPeople_(ss)), SAMPLE_SPEC.counts, Math.random).list;
-    if (!sample.length) { log_(ss, '群組抽樣', '（空池）', '', '', '略過', '沒有可抽的未認領名單'); return 0; }
-    rememberSample_(ss, today, SAMPLE_SPEC.groupPool, '*', sampleKeys_(sample));
-  }
   var G = resolveGroups_(ss);
   G.missing.forEach(function (n) {
     if (pending.indexOf(n) >= 0) log_(ss, '群組抽樣', n, '', '', '失敗', '找不到這個群組的 ID：請確認 Joseph 在群組裡、名稱完全相同、Webhook 已開啟，並在該群組傳一則訊息');
   });
-  var msg = [flex_('未認領推薦：' + countLine_(sample) + '・含本週回訪', sampleBubble_('未認領推薦', '弟兄姊妹平安！' + md_(today) + '（週' + weekday_(today) + '）兩群同一份抽樣', sample, '打開小頁面（完整名單）', cfg_('LIFF_URL'), weeklyOverview_(ss, today)))];
+  var overview = weeklyOverview_(ss, today), total = 0;
+  overview.rows.forEach(function (row) { total += row.count; });
+  var msg = [flex_('本週回訪總覽：' + md_(overview.from) + '–' + md_(overview.to) + '・合計 ' + total + ' 筆', groupOverviewBubble_(overview))];
   var left = quotaLeft_(), n = 0;
   pending.forEach(function (name) {
     var gid = G.found[name];
@@ -1831,9 +1829,7 @@ function pushGroupReminder() {
 function previewRemindersToAdmin() {
   var ss = openSs_(), today = today_();
   var personal = planPersonalSamples_(ss, today, Math.random);
-  var group = drawSample_(poolsFrom_(unclaimedPeople_(ss)), SAMPLE_SPEC.counts, Math.random).list;
-  var msgs = [];
-  if (group.length) msgs.push(flex_('預覽 未認領推薦', sampleBubble_('未認領推薦', '預覽（不寫送出紀錄）', group, '打開小頁面', cfg_('LIFF_URL'), weeklyOverview_(ss, today))));
+  var msgs = [flex_('預覽 本週回訪總覽', groupOverviewBubble_(weeklyOverview_(ss, today)))];
   saints_().forEach(function (s) {
     var list = personal.samples[s].list;
     if (list.length) msgs.push(flex_('預覽 本人已認領回訪 ' + s, sampleBubble_('本人已認領回訪', s, list, '填寫回訪', cfg_('LIFF_URL') + '?v=1')));
@@ -1865,7 +1861,7 @@ function releaseReadiness() {
     ok: missing.length === 0, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN, missingProperties: missing,
     groupPushEnabled: props.getProperty('GROUP_PUSH_ENABLED') === 'true', reminderTriggers: reminder,
     manifest: ROSTER_MANIFEST_V1.id,
-    note: '此檢查不讀取名單、不發送。nameOpen 為 one。apiVersion 2026-11-weekly-overview-1 只在群組卡加本週回訪，不改抽樣與觸發。遷移完成前 reminderTriggers 應為 0。'
+    note: '此檢查不讀取名單、不發送。nameOpen 為 one。apiVersion 2026-11-weekly-overview-2 的群組卡只有本週回訪總覽，個人抽樣不變。遷移完成前 reminderTriggers 應為 0。'
   };
   Logger.log(JSON.stringify(report));
   return report;

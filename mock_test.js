@@ -184,14 +184,14 @@ assert(triggers.some(t=>t.fn==='keepMe'));
 ctx.setupTriggers();
 assert(triggers.filter(t=>t.fn==='sendReminders').length===3);ok('pauseReminderTriggers 只刪提醒與月報，不建立新觸發');
 const health=JSON.parse(ctx.doGet().s);
-assert.strictEqual(health.apiVersion,'2026-11-weekly-overview-1');
+assert.strictEqual(health.apiVersion,'2026-11-weekly-overview-2');
 assert.strictEqual(health.nameEntry,'row-stable-id');
 assert.strictEqual(health.nameOpen,'one');
 assert(health.features.indexOf('observer')>=0&&health.features.indexOf('pending-not-D')>=0&&health.features.indexOf('name-link')>=0&&health.features.indexOf('name-open')>=0&&health.features.indexOf('co-care')>=0&&health.features.indexOf('weekly-overview')>=0);
 assert(health.features.indexOf('claimed-group-sample')<0);
 assert(health.apiVersion!=='2026-11-release-7'&&health.apiVersion!=='2026-11-name-link-1');
 let ready=ctx.releaseReadiness();
-assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.nameOpen==='one'&&ready.apiVersion==='2026-11-weekly-overview-1');
+assert(ready.ok&&ready.reminderTriggers>0&&ready.nameEntry==='row-stable-id'&&ready.nameOpen==='one'&&ready.apiVersion==='2026-11-weekly-overview-2');
 const savedSheet=props.SHEET_ID;delete props.SHEET_ID;
 ready=ctx.releaseReadiness();
 assert(!ready.ok&&String(ready.missingProperties).includes('SHEET_ID'));
@@ -260,16 +260,19 @@ pushes.length=0;assert.strictEqual(ctx.pushGroupReminder(),0);assert(log().at(-1
 props.GROUP_PUSH_ENABLED='true';
 setNow('2026-11-12');
 eqJ(ctx.groupNames_(),['一杯好咖啡','2-4柱子們']);
+const sampleRowsBefore=sheets['抽樣紀錄']?sheets['抽樣紀錄'].v.length:0;
 assert.strictEqual(ctx.pushGroupReminder(),1);eqJ(pushes.map(p=>p.to),['Cgood']);
+assert.strictEqual(sheets['抽樣紀錄']?sheets['抽樣紀錄'].v.length:0,sampleRowsBefore);
 const firstGroup=JSON.stringify(pushes[0].messages);
 assert(log().some(l=>l[1]==='群組抽樣'&&l[2]==='2-4柱子們'&&l[5]==='失敗'&&/找不到這個群組的 ID/.test(l[6])));
 assert(!pushes.some(p=>p.to==='Cother'));
 const gb=JSON.stringify(pushes[0].messages[0].contents);
-assert(gb.includes('未認領推薦')&&gb.includes('本週回訪')&&gb.includes('2012397222-u2XpUCRQ')&&!gb.includes('回訪總覽')&&!gb.includes('還在等人認領')&&!gb.includes('已認領回訪推薦'));
-ok('one group missing → logged, the other gets the shared unclaimed sample');
+assert(gb.includes('本週回訪總覽')&&gb.includes('合計')&&gb.includes('打開小頁面')&&gb.includes('2012397222-u2XpUCRQ'));
+assert(!gb.includes('未認領推薦')&&!gb.includes('暫定假設')&&!gb.includes('這次 A')&&!gb.includes('這不是完整名單')&&!gb.includes('已認領回訪推薦'));
+ok('one group missing → logged, the other gets the weekly overview and no sample is drawn');
 hook({destination:'UbotJoseph',events:[gev('join','Cpillar')]},K);
 pushes.length=0;assert.strictEqual(ctx.pushGroupReminder(),1);eqJ(pushes.map(p=>p.to),['Cpillar']);
-assert.strictEqual(JSON.stringify(pushes[0].messages),firstGroup);ok('same-day second group reuses the sample and does not resend the first group');
+assert.strictEqual(JSON.stringify(pushes[0].messages),firstGroup);ok('same-day second group gets the same overview and does not resend the first group');
 setNow('2026-11-14');GROUPS.Cpillar.name='改名了';pushes.length=0;assert.strictEqual(ctx.pushGroupReminder(),1);eqJ(pushes.map(p=>p.to),['Cgood']);
 assert(log().some(l=>l[2]==='2-4柱子們'&&l[5]==='失敗'));GROUPS.Cpillar.name='2-4柱子們';ok('renamed cached group is not pushed');
 setNow('2026-11-16');quota.used=185;pushes.length=0;assert.strictEqual(ctx.pushGroupReminder(),1);eqJ(pushes.map(p=>p.to),['Cgood']);
@@ -582,10 +585,16 @@ shown.list.forEach(p=>assert(shownText.includes(p.name)));
 crowd.filter(p=>shown.list.indexOf(p)<0).forEach(p=>assert(!shownText.includes(p.name)));
 assert(!shownText.includes('另外')&&!shownText.includes('未認領 20'));ok('sample bubble lists only the draw, not the rest of the unclaimed pool');
 
-const emptySs=makeSs({'待核實':[HH,['人','g',0,43,'']],'群組紀錄':[['記錄時間','事件類型','groupId／roomId／userId','來源類型','事件時間']]});
+const emptySs=makeSs({'待核實':[HH,['人','g',0,43,'']],'群組紀錄':[['記錄時間','事件類型','groupId／roomId／userId','來源類型','事件時間'],['t','join','Cgood','group','t']]});
 props.GROUP_PUSH_ENABLED='true';setNow('2026-12-07');
-withSs(emptySs,()=>{assert.strictEqual(ctx.pushGroupReminder(),0);});
-assert(emptySs.bag['推播紀錄'].v.some(row=>row[1]==='群組抽樣'&&/空池|沒有可抽/.test(String(row[6]))));ok('group push with only pending people logs an empty pool and does not send');
+const pushesBefore=pushes.length;
+withSs(emptySs,()=>{
+  assert.strictEqual(ctx.pushGroupReminder(),1);
+  const body=JSON.stringify(pushes[pushes.length-1].messages);
+  assert(body.includes('本週回訪總覽')&&!body.includes('未認領推薦')&&!body.includes('暫定假設'));
+});
+assert.strictEqual(pushes.length,pushesBefore+1);
+assert(!emptySs.bag['抽樣紀錄']);ok('group push with only pending people sends the overview and does not draw a sample');
 
 const bOnly=makeSs({'B 穩定':[HH,['穩','青職',10,1,'']]});
 withSs(bOnly,()=>{
@@ -866,9 +875,10 @@ withSs(weekSs,()=>{
   assert(!view.rows[0].people.some(p=>p.name==='週日前'));
   assert.strictEqual(view.rows[4].people.length,0);
   assert(!JSON.stringify(view).includes('不該列出'));
-  const bubble=ctx.sampleBubble_('未認領推薦','弟兄姊妹平安！11/13（週五）兩群同一份抽樣',[{name:'未認甲',tier:'A',stableId:'2-4|未|1',key:'2-4|未|1'}],'打開小頁面（完整名單）','https://liff.line.me/2012397222-u2XpUCRQ',view);
+  const bubble=ctx.groupOverviewBubble_(view);
   const raw=JSON.stringify(bubble);
-  assert(raw.includes('本週回訪')&&raw.includes('認領數只計主要')&&raw.includes('蕭仲良　20 筆')&&raw.includes('高萱　0 筆')&&raw.includes('本週沒有回訪')&&raw.includes('訪蕭重複×2（未聯繫上）')&&raw.includes('暫定假設')&&raw.includes('未認領推薦'));
+  assert(raw.includes('本週回訪總覽')&&raw.includes('合計 40 筆')&&raw.includes('認領數只計主要')&&raw.includes('蕭仲良　20 筆')&&raw.includes('高萱　0 筆')&&raw.includes('本週沒有回訪')&&raw.includes('訪蕭重複×2（未聯繫上）')&&raw.includes('打開小頁面'));
+  assert(!raw.includes('未認領推薦')&&!raw.includes('暫定假設')&&!raw.includes('這次 A'));
   assert(raw.length<10000);
   const personal=JSON.stringify(ctx.sampleBubble_('本人已認領回訪','李彥霆 平安！',[],'填寫回訪','https://liff.line.me/2012397222-u2XpUCRQ?v=1'));
   assert(!personal.includes('本週回訪'));
@@ -881,9 +891,9 @@ for(let i=0;i<300;i++) longRows.push(['t','蕭仲良','A 優先','很長的回�
 const longSs=makeSs({'A 優先':[HH],'名單索引':[['穩定ID','認領者','分頁','分級','姓名','出席狀態','有效','併入'],['2-4|長|1','蕭仲良','A 優先','A','甲','verified','Y','']],'回訪紀錄':longRows,'LINE綁定':[['userId','displayName','聖徒姓名','綁定時間','角色'],['U0','蕭','蕭仲良','t','saint'],['U1','高','高萱','t','saint']]});
 withSs(longSs,()=>{
   const view=ctx.weeklyOverview_(longSs,'2026-11-13');
-  const bubble=ctx.sampleBubble_('未認領推薦','弟兄姊妹平安',[{name:'未',tier:'D',stableId:'2-4|未|9',key:'2-4|未|9'}],'打開小頁面','https://liff.line.me/2012397222-u2XpUCRQ',view);
+  const bubble=ctx.groupOverviewBubble_(view);
   const raw=JSON.stringify(bubble);
-  const msg=JSON.stringify(ctx.flex_('未認領推薦',bubble));
+  const msg=JSON.stringify(ctx.flex_('本週回訪總覽',bubble));
   assert(raw.length<10000&&msg.length<30000);
   assert(raw.includes('等 ')&&raw.includes(' 位')&&raw.includes('高萱　0 筆')&&raw.includes('蕭仲良　300 筆'));
   assert(!raw.includes('很長的回訪對象姓名299'));
