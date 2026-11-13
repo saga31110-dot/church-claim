@@ -15,7 +15,7 @@
  * 上線順序：先把必填屬性設好，貼上本檔後立刻 pauseReminderTriggers，再部署同一個 /exec，
  * 瀏覽器看到 apiVersion 後才換前端；最後才 setupTriggers。不要先換 GitHub Pages。
  */
-var API_VERSION = '2026-11-multi-claim-1';
+var API_VERSION = '2026-11-weekly-overview-2';
 var NAME_ENTRY = 'row-stable-id';
 var NAME_OPEN = 'one';
 var CONFIG = {
@@ -115,7 +115,7 @@ function adminUserId_() {
 function doGet() {
   return ContentService.createTextOutput(JSON.stringify({
     ok: true, service: '回訪認領 API', apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN,
-    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'name-link', 'name-open', 'co-care']
+    features: ['observer', 'tier-B', 'pending-not-D', 'sample-A2B2CD4', 'schedule-mon-thu-sat-09', 'migration-manifest-v1', 'name-link', 'name-open', 'co-care', 'weekly-overview']
   })).setMimeType(ContentService.MimeType.JSON);
 }
 function doPost(e) {
@@ -1617,6 +1617,92 @@ function countLine_(list) {
   list.forEach(function (p) { if (p.tier === 'A') a++; else if (p.tier === 'B') b++; else if (p.tier === 'C' || p.tier === 'D') cd++; });
   return '這次 A ' + a + '、B ' + b + '、C/D ' + cd + '（池不足不跨級補齊）';
 }
+function boundSaintNames_(ss) {
+  var sh = ss.getSheetByName(CONFIG.BIND_TAB);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var v = sh.getDataRange().getValues();
+  var header = (v[0] || []).map(function (x) { return String(x == null ? '' : x).trim(); });
+  var nameCol = header.indexOf('聖徒姓名');
+  if (nameCol < 0) nameCol = 2;
+  var roleCol = header.indexOf('角色');
+  var seen = {}, out = [];
+  for (var i = 1; i < v.length; i++) {
+    var saint = String(v[i][nameCol] == null ? '' : v[i][nameCol]).trim();
+    var role = roleCol < 0 ? '' : String(v[i][roleCol] == null ? '' : v[i][roleCol]).trim();
+    if (!saint || role === 'observer' || seen[saint]) continue;
+    seen[saint] = 1;
+    out.push(saint);
+  }
+  return out;
+}
+function primaryClaimCounts_(ss) {
+  var counts = {};
+  listPeople_(ss).forEach(function (p) {
+    if (!p || !p.by || p.active === 'N' || p.mergedInto) return;
+    counts[p.by] = (counts[p.by] || 0) + 1;
+  });
+  return counts;
+}
+function weeklyOverview_(ss, today) {
+  today = today || today_();
+  var from = weekStart_(today), names = boundSaintNames_(ss), claims = primaryClaimCounts_(ss), bySaint = {};
+  names.forEach(function (s) { bySaint[s] = {}; });
+  readVisits_(ss).forEach(function (r) {
+    if (!r.date || r.date < from || r.date > today || !bySaint[r.saint]) return;
+    var person = String(r.name || '').trim();
+    if (!person) return;
+    var slot = bySaint[r.saint][person] || { name: person, times: 0, missed: 0 };
+    slot.times++;
+    if (r.status === '未聯繫上') slot.missed++;
+    bySaint[r.saint][person] = slot;
+  });
+  return {
+    from: from, to: today,
+    rows: names.map(function (s) {
+      var people = Object.keys(bySaint[s]).map(function (k) { return bySaint[s][k]; });
+      people.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+      var count = 0;
+      people.forEach(function (p) { count += p.times; });
+      return { saint: s, count: count, claims: claims[s] || 0, people: people };
+    })
+  };
+}
+function weeklyPersonLabel_(p) {
+  var text = p.name;
+  if (p.times > 1) text += '×' + p.times;
+  if (p.missed) text += '（未聯繫上）';
+  return text;
+}
+function weeklyOverviewContents_(overview, keep) {
+  var contents = [txt_('本週回訪', { weight: 'bold', color: '#1F4E79', size: 'md' })];
+  contents.push(txt_(md_(overview.from) + '–' + md_(overview.to) + '・認領數只計主要', { size: 'xs', color: '#666666', margin: 'sm', wrap: true }));
+  if (!overview.rows.length) {
+    contents.push(txt_('目前沒有綁定聖徒', { size: 'sm', color: '#666666', margin: 'sm', wrap: true }));
+    return contents;
+  }
+  overview.rows.forEach(function (row) {
+    contents.push(txt_(row.saint + '　' + row.count + ' 筆・認領 ' + row.claims, { size: 'sm', weight: 'bold', margin: 'md', color: '#222222', wrap: true }));
+    if (!row.people.length) {
+      contents.push(txt_('本週沒有回訪', { size: 'xs', color: '#888888', margin: 'sm', wrap: true }));
+      return;
+    }
+    var labels = row.people.map(weeklyPersonLabel_);
+    var shown = [], used = 0, limit = Math.min(keep, labels.length);
+    for (var n = 0; n < limit; n++) {
+      var next = (shown.length ? '、' : '') + labels[n];
+      var restAfter = labels.length - (n + 1);
+      var reserve = restAfter > 0 ? ('、等 ' + restAfter + ' 位').length : 0;
+      if (used + next.length + reserve > 500) break;
+      shown.push(labels[n]);
+      used += next.length;
+    }
+    var rest = labels.length - shown.length;
+    var line = shown.join('、');
+    if (rest > 0) line += (line ? '、' : '') + '等 ' + rest + ' 位';
+    contents.push(txt_(line, { size: 'xs', color: '#555555', wrap: true, margin: 'sm' }));
+  });
+  return contents;
+}
 function sampleBubble_(title, whoLine, people, buttonLabel, uri) {
   var body = sampleSections_(people);
   body.push(txt_(countLine_(people), { size: 'xs', color: '#666666', margin: 'md' }));
@@ -1628,6 +1714,26 @@ function sampleBubble_(title, whoLine, people, buttonLabel, uri) {
       txt_(whoLine, { color: '#D7F2EA', size: 'sm', margin: 'sm' })] },
     body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents: body },
     footer: { type: 'box', layout: 'vertical', contents: [{ type: 'button', style: 'primary', color: '#06C755', height: 'md', action: { type: 'uri', label: buttonLabel, uri: uri } }] } };
+}
+function groupOverviewBubble_(overview) {
+  var total = 0;
+  (overview.rows || []).forEach(function (row) { total += row.count; });
+  function build(keep) {
+    var body = [txt_('認領數只計主要。同一人多筆會標次數；有未聯繫上會標註。', { size: 'xs', color: '#666666', wrap: true })].concat(weeklyOverviewContents_(overview, keep).slice(2));
+    return { type: 'bubble', size: 'mega',
+      header: { type: 'box', layout: 'vertical', backgroundColor: '#1F6F5C', paddingAll: '16px', contents: [
+        txt_('本週回訪總覽', { color: '#FFFFFF', weight: 'bold', size: 'xl' }),
+        txt_(md_(overview.from) + '–' + md_(overview.to) + '・合計 ' + total + ' 筆', { color: '#D7F2EA', size: 'sm', margin: 'sm', wrap: true })] },
+      body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents: body },
+      footer: { type: 'box', layout: 'vertical', contents: [{ type: 'button', style: 'primary', color: '#06C755', height: 'md', action: { type: 'uri', label: '打開小頁面', uri: cfg_('LIFF_URL') } }] } };
+  }
+  var keep = 999, bubble = null;
+  while (keep >= 0) {
+    bubble = build(keep);
+    if (JSON.stringify(bubble).length <= 9500 || keep === 0) return bubble;
+    keep = keep > 12 ? Math.ceil(keep / 2) : keep - 1;
+  }
+  return bubble;
 }
 function flex_(alt, bubble) { return { type: 'flex', altText: String(alt).slice(0, 400), contents: bubble }; }
 
@@ -1700,18 +1806,13 @@ function pushGroupReminder() {
   if (!props.getProperty('JOSEPH_TOKEN')) { log_(ss, '群組抽樣', names.join('、'), '', '', '失敗', '尚未設定指令碼屬性 JOSEPH_TOKEN'); return 0; }
   var pending = names.filter(function (n) { return !sentToday_(ss, '群組抽樣', n, today); });
   if (!pending.length) { log_(ss, '群組抽樣', '（全部）', '', '', '略過', '同日已送出'); return 0; }
-  var keys = savedSampleKeys_(ss, today, SAMPLE_SPEC.groupPool);
-  var sample = keys ? peopleByKeys_(ss, keys) : null;
-  if (!sample) {
-    sample = drawSample_(poolsFrom_(unclaimedPeople_(ss)), SAMPLE_SPEC.counts, Math.random).list;
-    if (!sample.length) { log_(ss, '群組抽樣', '（空池）', '', '', '略過', '沒有可抽的未認領名單'); return 0; }
-    rememberSample_(ss, today, SAMPLE_SPEC.groupPool, '*', sampleKeys_(sample));
-  }
   var G = resolveGroups_(ss);
   G.missing.forEach(function (n) {
     if (pending.indexOf(n) >= 0) log_(ss, '群組抽樣', n, '', '', '失敗', '找不到這個群組的 ID：請確認 Joseph 在群組裡、名稱完全相同、Webhook 已開啟，並在該群組傳一則訊息');
   });
-  var msg = [flex_('未認領推薦：' + countLine_(sample), sampleBubble_('未認領推薦', '弟兄姊妹平安！' + md_(today) + '（週' + weekday_(today) + '）兩群同一份抽樣', sample, '打開小頁面（完整名單）', cfg_('LIFF_URL')))];
+  var overview = weeklyOverview_(ss, today), total = 0;
+  overview.rows.forEach(function (row) { total += row.count; });
+  var msg = [flex_('本週回訪總覽：' + md_(overview.from) + '–' + md_(overview.to) + '・合計 ' + total + ' 筆', groupOverviewBubble_(overview))];
   var left = quotaLeft_(), n = 0;
   pending.forEach(function (name) {
     var gid = G.found[name];
@@ -1728,9 +1829,7 @@ function pushGroupReminder() {
 function previewRemindersToAdmin() {
   var ss = openSs_(), today = today_();
   var personal = planPersonalSamples_(ss, today, Math.random);
-  var group = drawSample_(poolsFrom_(unclaimedPeople_(ss)), SAMPLE_SPEC.counts, Math.random).list;
-  var msgs = [];
-  if (group.length) msgs.push(flex_('預覽 未認領推薦', sampleBubble_('未認領推薦', '預覽（不寫送出紀錄）', group, '打開小頁面', cfg_('LIFF_URL'))));
+  var msgs = [flex_('預覽 本週回訪總覽', groupOverviewBubble_(weeklyOverview_(ss, today)))];
   saints_().forEach(function (s) {
     var list = personal.samples[s].list;
     if (list.length) msgs.push(flex_('預覽 本人已認領回訪 ' + s, sampleBubble_('本人已認領回訪', s, list, '填寫回訪', cfg_('LIFF_URL') + '?v=1')));
@@ -1762,7 +1861,7 @@ function releaseReadiness() {
     ok: missing.length === 0, apiVersion: API_VERSION, nameEntry: NAME_ENTRY, nameOpen: NAME_OPEN, missingProperties: missing,
     groupPushEnabled: props.getProperty('GROUP_PUSH_ENABLED') === 'true', reminderTriggers: reminder,
     manifest: ROSTER_MANIFEST_V1.id,
-    note: '此檢查不讀取名單、不發送。nameOpen 為 one 仍是單人開啟。apiVersion 2026-11-multi-claim-1 只另加共同照顧，不改抽樣。遷移完成前 reminderTriggers 應為 0。'
+    note: '此檢查不讀取名單、不發送。nameOpen 為 one。apiVersion 2026-11-weekly-overview-2 的群組卡只有本週回訪總覽，個人抽樣不變。遷移完成前 reminderTriggers 應為 0。'
   };
   Logger.log(JSON.stringify(report));
   return report;
